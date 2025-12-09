@@ -52,3 +52,27 @@
     ```
 
     This code no longer works in C++20. It results in an endless recursion. This is because inside the global function, the expression `t == i` can also call the global `operator==()` itself, because the compiler also tries to rewrite the call as `i == t`. Unfortunately, the rewritten statement is a better match because it does not need the implicit type conversion. We have no solution yet to support backward compatibility here; however, compilers are already starting to warn about code like this.
+
+## Chapter 2: Placeholder Types for Function Parameters
+
+1) Since C++20, you can use placeholders such as `auto` for all functions (including member functions and operators), not just lambdas (since C++14). The only difference wrt templates is that by using `auto` you no longer have a name for the template parameter `T`. For this reason, this feature is also called the abbreviated function template syntax.
+
+2) Because functions with `auto` are function templates, all rules of using function templates apply. That especially has the consequence that you cannot implement a function with auto parameters in one translation unit (CPP file) while calling it in a different translation unit.  Function templates are always `inline`. Note that templates may not be declared inside functions. Therefore, with that feature you can no longer define the class or data structure locally inside a function:
+
+    ```c++
+    void foo()
+    {
+        struct Data 
+        {
+            void mem(auto); // ERROR can’t declare 
+            // templates insides functions
+        };
+    }
+    ```
+3) `void foo(auto... args);` is equivalent to 
+    ```c++ 
+    template<typename... Types>
+    void foo(Types... args);
+    ```
+
+## Chapter 3: Concepts and Requirements
