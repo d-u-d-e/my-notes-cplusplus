@@ -196,3 +196,45 @@
 16) The main benefit of concepts is that they subsume. Type traits do not subsume.
 
 ## Chapter 4: Concepts, Requirements, and Constraints in Detail
+
+1) The operators `&&` and `||` are the only operators you can use to combine multiple constraints without having to use parentheses.
+
+2) A simple requirement such as `*p > val || p == nullptr;` does not require that either the left or the right sub-expression is possible.  It formulates the requirement that we can combine the results of both sub-expressions with the operator `||`. To require either one of the two sub-expressions, you have to use:
+    ```c++
+    template<typename T1, typename T2>
+    requires(T1 val, T2 p) {
+    *p > val;
+    // support the comparison of the result of operator* with T1
+    }
+    || requires(T2 p) { // OR
+    p == nullptr;
+    // support the comparison of a T2 with nullptr
+    }
+    ```
+
+3) Type requirements are expressions that have to be well-formed when using a name of a type. This means that the specified name has to be defined as a valid type.
+    ```c++
+    template<typename T1, typename T2>
+    requires {
+    typename T1::value_type; // type member value_type required for T1
+    typename std::ranges::iterator_t<T1>; // iterator type required for T1
+    typename std::common_type_t<T1, T2>; // T1 and T2 have to have a common type
+    }
+    ```
+
+4) Note that simple requirements check only whether a requirement is valid, not whether it is fulfilled.
+
+5)  The benefit of nested requirements is that we can ensure that a compile-time expression (that uses parameters or sub-expressions of the requires expression) yields a certain result instead of ensuring only that the expression is valid.
+    ```c++
+    template<typename T>
+    concept DerefAndIndexMatch = requires (T p) {
+        requires std::same_as<decltype(*p), decltype(p[0])>;
+    };
+    ```
+    or
+    ```c++
+    template<typename T>
+    concept DerefAndIndexMatch = std::same_as<decltype(*std::declval<T>()), decltype(std::declval<T>()[0])>;
+    ```
+
+75
