@@ -76,3 +76,123 @@
     ```
 
 ## Chapter 3: Concepts and Requirements
+
+1) Overload resolution considers templates with constraints as more specialized than templates without constraints. By using concepts, we can even prefer some constraints over others. However, this requires the use of concepts that **subsume** other concepts.
+
+2) You can use the concept as a type constraint when declaring parameters with `auto`.
+    ```c++
+    auto maxValue(IsPointer auto a, IsPointer auto b)
+    {
+        return maxValue(*a, *b);
+    }
+    ```
+
+3) A **trailing requires clause** can be specified after the parameter list:
+    ```c++
+    auto maxValue(IsPointer auto a, IsPointer auto b)
+    requires IsComparableWith<decltype(*a), decltype(*b)>
+    {
+        return maxValue(*a, *b);
+    }
+    ```
+    It has the benefit that it can use the name of a parameter or combine even multiple parameter names to formulate constraints.
+
+4) Note that you cannot constrain concepts:
+    ```c++
+    template<std::ranges::sized_range T> concept IsIntegralValType = std::integral<std::ranges::range_value_t<T>>; //ERROR
+    ```
+    But you must do:
+    ```c++
+    template<typename T> concept IsIntegralValType = std::ranges::sized_range<T> && std::integral<std::ranges::range_value_t<T>>;
+    ```
+
+5) Here is an example of constraining *alias templates* (generic using declarations):
+    ```c++
+    template<std::ranges::range T> using ValueType = std::ranges::range_value_t<T>;
+    ```
+6) Here is an example of constraining *variable templates*:
+    ```c++
+    template<std::ranges::range T> constexpr bool IsIntegralValType = std::integral<std::ranges::range_value_t<T>>;
+    ```
+7) It is not only types that you can constrain. You can also constrain values that are template parameters (non-type template parameters (NTTP)).
+    ```c++
+    template<int Val>
+    concept LessThan10 = Val < 10;
+    ```
+8) Constraints help us to understand the restrictions on templates and to get more understandable error messages when requirements are broken. Constraints can be used to disable generic code for cases where the code does not make sense:  for some types, generic code might compile but not do the right thing. Constraints can be used to overload or specialize generic code so that different code is compiled for different types.
+
+9) If two overloads or specializations have constraints, it is important that overload resolution can decide which one is better. To support this, the signatures should not differ more than necessary.
+
+    ```c++
+    template<typename Coll, typename T>
+    void add(Coll& coll, const T& val) // note: pass by const reference
+    {
+        coll.push_back(val);
+    }
+    template<typename Coll, std::floating_point T>
+    void add(Coll& coll, T val) // note: pass by value
+    {
+        ... // special code for floating-point values
+        coll.push_back(val);
+    }
+
+    std::vector<double> dVec;
+    add(dVec, 0.7); // ERROR: both templates match and no preference
+    ```
+
+10) Concepts can **subsume** other concepts, which means that they count as more specialized for overload resolution. In fact, the C++ standard concepts build a pretty complex subsumption graph.
+
+11) We can use concepts inside `if constexpr`:
+    ```c++
+    template<typename Coll, typename T>
+    void add(Coll& coll, const T& val)
+    {
+        if constexpr (SupportsPushBack<decltype(coll)>) {
+            coll.push_back(val);
+        }
+        else {
+            coll.insert(val);
+        }
+    }
+    ```
+
+    In fact, there's no need to introduce the concept, you can do:
+
+    ```c++
+    if constexpr (requires { coll.push_back(val); }) {
+        coll.push_back(val);
+    }
+    else {
+        coll.insert(val);
+    }
+    ```
+
+    This is a nice way to switch between two different function calls in generic code. It is especially recommended when introducing a concept is not worthwhile.
+
+12) You might wonder why using concepts is better than using a variable template of type bool (like type traits do) such as the following:
+    ```c++
+    template<typename T>
+    constexpr bool SupportsPushBack = requires(T coll) {
+        coll.push_back(std::declval<typename T::value_type>());
+    };
+    ```
+    Concepts have the following benefits: they subsume, they can be used as type constraints, they can be used with a compile-time if.
+
+13) Concepts can be used to document semantic constraint that cannot be checked at compile time:
+    ```c++
+    template<std::weakly_incrementable T>
+    void algo1(T beg, T end); // single-pass algorithm
+    
+    template<std::incrementable T>
+    void algo2(T beg, T end); // multi-pass algorithm
+    ```
+
+    With `weakly_incrementable` you can iterate over a range only once.
+
+14) Introducing a concept for each attribute or functionality of types is certainly too fine-grained. Therefore, concepts should provide common and typical aspects that separate different categories of requirements or types.
+
+15) Concepts subsume, which means that a concept can be a subset of another concept, so that in overload resolution the more constrained concept is preferred. For a compiler, it might not be easy to find out whether a set of requirements is a subset of another set of requirements. For example, when a concept for two template parameters is commutative (so that the order of two parameters should not matter), a concept needs careful design (see `std::same_as`).
+
+16) The main benefit of concepts is that they subsume. Type traits do not subsume.
+
+## Chapter 4: Concepts, Requirements, and Constraints in Detail
