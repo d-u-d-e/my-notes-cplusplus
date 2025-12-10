@@ -237,4 +237,28 @@
     concept DerefAndIndexMatch = std::same_as<decltype(*std::declval<T>()), decltype(std::declval<T>()[0])>;
     ```
 
-75
+## Chapter 5: Standard Concepts in Detail
+
+1) Some concepts:
+    - `std::movable<T>`: Guarantees that type T is movable and swappable. That is, you can move construct, move assign, and swap with another object of the type.
+    - `std::copyable<T>`: Guarantees that type T is copyable (which implies movable and swappable).
+    - `std::semiregular<T>`:  Guarantees that type T is semiregular (can default initialize, copy, move, and swap).
+    - `std::regular<T>`:  Guarantees that type T is regular (can default initialize, copy, move, swap, and check for equality).
+    - `std::same_as<T1, T2>`: Guarantees that the types T1 and T2 are the same. The concept calls the `std::is_same_v` type trait twice to ensure that the order of the parameters does not matter.
+    - `std::convertible_to<From, To>`: Guarantees that objects of type From are both implicitly and explicitly convertible to objects of type To.
+    - `std::derived_from<D, B>`: Guarantees that type D is publicly derived from type B (or D and B are the same) so that any pointer of type D can be converted to a pointer of type B.
+    - `std::common_with<T1, T2>`: Guarantees that types T1 and T2 share a common type to which they can be explicitly converted.
+    - `std::common_reference_with<T1, T2>`: Guarantees that types T1 and T2 share a common_reference type to which they can be explicitly and implicitly converted.
+    - `std::equality_comparable<T>`: Guarantees that objects of type T are comparable with the operators == and !=. The order should not matter.
+    - `std::totally_ordered<T>`: Guarantees that objects of type T are comparable with the operators ==, !=, <, <=, >, and >= so that two values are always either equal to, or less than, or greater than each other. The concept **does not** claim that type T has a total order for all values.  In fact, the expression `std::totally_ordered<double>` yields true.
+    - `std::ranges::range<Rg>`: Guarantees that Rg is a valid range. This is the case if the range is either an array or provides `begin()` and `end()` members or can be used with free-standing `begin()` and `end()` functions.
+    - `std::ranges::output_range<Rg, T>`: Guarantees that Rg is a range that provides at least output iterators (iterators that you can use to write) that accept values of type T.
+    - `std::ranges::input_range<Rg>`, `std::ranges::forward_range<Rg>`, `std::ranges::bidirectional_range<Rg>`, `std::ranges::random_access_range<Rg>`, `std::ranges::contiguous_range<Rg>` are similar.
+    - `std::ranges::sized_range<Rg>`: Guarantees that Rg is a range where the number of elements can be computed in constant time. Note that the performance aspect of this concept is a semantic constraint, which cannot be checked at compile time. To signal that a type does not satisfy this concept even though it provides `size()`, you can define that `std::disable_sized_range<Rg>` yields `true`.
+    - `std::ranges::common_range<Rg>`: Guarantees that Rg is a range where the begin iterator and the sentinel (end iterator) have the same type. The guarantee is always given by all standard containers, but not by all views (for instance iota views with no end value).
+    - `std::ranges::view<Rg>`:  Guarantees that Rg is a view (a range that is cheap to copy or move, assign, and destroy).
+    - `std::invocable<Op, ArgTypes...>`: Guarantees that Op can be called for the arguments of types `ArgTypes...`. To document that neither the operation nor the passed arguments are modified, you can use `std::regular_invocable` instead. However, note that there is only a semantic difference between these two concepts, which cannot be checked at compile time. Op can be a function, function object, lambda, or pointer-to-member (note that it's okay to invoke a pointer to a data member, and the result is a reference to the data member).
+    - `std::predicate<Op, ArgTypes...>`: Requires `std::regular_invocable<Op>` and all calls of Op with `ArgTypes...` yield a value that can be used as a as Boolean value.
+    - `std::relation<Pred, T1, T2>`: Guarantees that any two objects of types T1 and T2 have a binary relationship in that they can be passedas arguments to the binary predicate Pred.
+
+## Chapter 6: Ranges and Views
