@@ -262,3 +262,96 @@
     - `std::relation<Pred, T1, T2>`: Guarantees that any two objects of types T1 and T2 have a binary relationship in that they can be passedas arguments to the binary predicate Pred.
 
 ## Chapter 6: Ranges and Views
+
+1) Most standard algorithms support passing ranges as one argument since C++20. However, there is no support for parallel algorithms and numeric algorithms (yet). Besides taking only one argument for a range as a whole, the new algorithms may have a couple of minor differences:
+    - They use concepts for iterators and ranges to ensure that you pass valid iterators and ranges.
+    - They might have different return types.
+    - They might return borrowed iterators, signaling that there is no valid iterator because a temporary range (rvalue) was passed.
+
+2) **Views** are lightweight ranges that are cheap to create and
+copy/move. Views can refer to ranges and subranges, own temporary ranges,  filter out elements, yield transformed values of the elements, generate a sequence of values themselves.
+
+3) Most views on lvalues (ranges that have a name) have reference semantics. Therefore, you have to ensure that the referred ranges and iterators of views still exist and are valid. Besides having reference semantics, views use lazy evaluation. This means that views do their processing for the next element when an iterator to the view calls `begin()` or `++` or the value of the element is requested. In addition, some views use caching.
+
+4) Inserting or removing elements in the underlying range may have significant impact on the functionality of a view. After such modification, a view might behave differently or even no longer be valid (due to optimizations for example). Therefore, it is strongly recommended to use views right before you need them. Create views to use them ad hoc. If modifications happen between initializing a view and using it, care has to be taken.
+
+5) In the ranges library, **sentinels** define the end of a range. In the traditional approach of the STL, sentinels would be the end iterators, which usually have the same type as the iterators that iterate over a collection. However, with C++20 ranges, having the same type is no longer required.  Creating an end iterator may be expensive or might not even be possible.
+Note that before C++20, we could also have these kinds of sentinels but they were required to have the same type as the iterators. One example was input stream iterators: a default constructed iterator of type `std::istream_iterator<>` was used to create an end-of-stream iterator so that you could process input from a stream with an algorithm until end-of-file or an error occurs:
+
+    ```c++
+    std::for_each(
+        std::istream_iterator<int>{std::cin},
+        std::istream_iterator<int>{},
+        [] (int val) {
+            std::cout << val << '\n';
+        }
+    );
+    ```
+    By relaxing the requirement that sentinels (end iterators) now have to have the same type as iterating iterators, we gain a couple of benefits: We can skip the need to find the end before we start to process, for the end iterator, we can use types that disable operations that cause undefined behavior (eg operator *), defining an end iterator becomes easier:
+
+    ```c++
+    struct NullTerm {
+        bool operator== (auto pos) const {
+            return *pos == '\0';
+        }
+    };
+
+    const char* rawString = "hello world";
+    std::ranges::for_each(
+        rawString, 
+        NullTerm{}, 
+        [] (char c) {std::cout << ' ' << c;}
+    );
+    ```
+
+    The algorithms in the namespace `std` still require that the begin iterator and the end iterator have the same type.
+
+6) A **subrange** is the generic type that can be used to convert a range defined by an iterator and a sentinel into a single object that represents this range. In fact, the range is even a view, which internally, just stores the iterator and the sentinel. This means that subranges have reference semantics and are cheap to copy. You create it through `std::ranges::subrange` by passing the iterator and the sentinel.
+
+7) As another example of sentinels, look at `std::unreachable_sentinel`. This is a value that C++20 defines to represent the “end” of an endless range. It can help you to optimize code so that it never compares against the end (because that comparison is useless if it always yields false).
+
+8) The most convenient way to create a range with a begin iterator and a count is to use the range adaptor `std::views::counted()`. It creates a cheap view to the first n elements of a begin iterator/pointer.
+
+9) `sort()` and many other algorithms for ranges usually have an additional optional template parameter, a projection: the optional additional parameter allows you to specify a transformation (projection) for each element before the algorithm processes it further.
+
+    ```c++
+        std::ranges::sort(coll,
+            std::ranges::less{},
+            // still compare with <
+            [] (auto val) {
+                // but use the absolute value
+                return std::abs(val);
+            }
+        );
+    ```
+
+10) In C++20, ranges also have some major limitations and drawbacks that should be mentioned in a general introduction to them: 
+    - There is no ranges support for numeric algorithms yet
+    - There is no support for ranges for parallel algorithms yet. For some views, concurrent iterations cause undefined behavior. Only dothis after declaring the view to be const. **For some views, you cannot iterate over elements when the views are const**. Generic code might therefore have to use universal/forwarding references.
+    - When views refer to containers, their propagation of constness may be broken.
+
+11) Many algorithms return iterators to the ranges they operate on. However, when passing ranges as a single argument, we can get a new problem that was not possible when a range required two arguments (the begin iterator and the end iterator): if you pass a temporary range (such as a range returned by a function) and return an iterator to it, the returned iterator might become invalid at the end of the statement when the range is destroyed. Using the returned iterator (or a copy of it) would result in undefined behavior. To deal with this problem, the ranges library has introduced the concept of **borrowed iterators**. By using type `std::ranges::borrowed_iterator_t<>`, algorithms can declare the returned iterator as borrowed. This means that the algorithm always returns an iterator that is safe to use after the statement. The consequence of this feature is that you cannot pass a temporary object to an algorithm even if the resulting code would be valid:
+    ```c++
+    process(std::ranges::find(getData(), 42));
+    ```
+    Although the iterator would be valid during the function call (the temporary vector would be destroyed after the call), `find()` returns a `std::ranges::dangling` object.
+
+12) Range types can claim that they are **borrowed ranges**. This means that their iterators can still be used when the range itself no longer exists. All lvalues (objects with names) are borrowed ranges, which means that the returned iterator cannot be dangling as long as the iterator exists in the same scope or a sub-scope of the range. For temporary views it depends. View that hold copies are declared as borrowed ranges (i.e. iota). If you implement a container or a view, you can signal that it is a borrowed range by specializing the variable template `std::ranges::enable_borrowed_range<>`.
+    ```c++
+    auto pos3 = std::ranges::find(std::views::iota(8), 8);
+    // borrowed range
+    std::cout << *pos3; // OK
+    ```
+    The iota view iterators hold copies of the element they refer to, which means that iota views are declared as borrowed ranges.
+
+13) `std::views::all` is used as a factory function to generate a view from a range. There are other factories such as `iota`, `single`, `empty`, ecc. You can explicitly convert elements of a container to a view by passing a begin iterator and an end (sentinel) or a size to a `std::ranges::subrange` or `std::views::counted()`. Or you can create a view directly by usually passing the range to the constructor: `std::ranges::take_view first4{coll, 4};`.
+
+14) The following: 
+    ```c++
+    for (const auto& elem : getColl() | std::views::take(5)) {
+        std::cout << "- " << elem << '\n';
+    }
+    ```
+    is valid, although in general, **it is a fatal runtime error to use a reference to a temporary as a collection a range-based for loop iterates over** (the lifetime of any temporary within range_expression is not extended, but it's okay to just have a temporary). Because passing a temporary range object (rvalue) moves the range into an `owning_view`, the view does not refer to an external container and therefore there is no runtime error.
+
+15) Modifying leading elements of ranges (changing their value or inserting/deleting elements) may invalidate views if and only if `begin()` has already been called before the modification. Therefore, iterating over the elements of a view might invalidate a later use if its referred range has been modified in the meantime.
