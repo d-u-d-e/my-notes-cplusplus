@@ -355,3 +355,97 @@ Note that before C++20, we could also have these kinds of sentinels but they wer
     is valid, although in general, **it is a fatal runtime error to use a reference to a temporary as a collection a range-based for loop iterates over** (the lifetime of any temporary within range_expression is not extended, but it's okay to just have a temporary). Because passing a temporary range object (rvalue) moves the range into an `owning_view`, the view does not refer to an external container and therefore there is no runtime error.
 
 15) Modifying leading elements of ranges (changing their value or inserting/deleting elements) may invalidate views if and only if `begin()` has already been called before the modification. Therefore, iterating over the elements of a view might invalidate a later use if its referred range has been modified in the meantime.
+
+## Chapter 8: View Types in Detail
+
+1) The class template `std::ranges::subrange<>` defines a view to the elements of a range that is usually passed as a pair of begin iterator and sentinel (end iterator).  Internally, the view itself represents the elements by storing begin (iterator) and end (sentinel). The major use case of the subrange view is to convert a pair of begin iterator and sentinel (end iterator) into one object. For example:
+    ```c++
+    std::vector<int> coll{0, 8, 15, 47, 11, -1, 13};
+    std::ranges::subrange s1{std::ranges::find(coll, 15),
+    std::ranges::find(coll, -1)};
+    print(coll); // 15 47 11
+    ```
+
+2) The type of subranges depends only on the type of the iterators (and whether or not size() is provided). This can be used to harmonize the type of raw arrays:
+    ```c++
+    int a1[5] = { ... };
+    int a2[10] = { ... };
+    std::same_as<decltype(a1), decltype(a2)> // false
+    std::same_as<decltype(std::ranges::subrange{a1}), decltype(std::ranges::subrange{a2})> // true
+    ```
+
+3) The class template `std::ranges::ref_view<>` defines a view that simply refers to a range. That way, passing the view by value has an effect like passing the range by reference. The effect is similar to type `std::reference_wrapper<>`. Passing a container to a coroutine, which usually has to take parameters by value, may be one application of this technique. Note that you can only create a ref view to an lvalue (a range that has a name). For an rvalue, you have to use an owning view. Ref views can also (and usually should) be created with a range factory: `std::views::all(rg)`. Note that all other views that take a range indirectly call all() for that passed range (by using `std::views::all_t<>`). For that reason, a ref view is almost always created automatically if you pass an lvalue that is not a view to one of the views.
+
+4) The class template `std::ranges::owning_view<>` defines a view that takes ownership of the elements of another range. This is the only view (so far) that might own multiple elements. However, construction is still cheap, because an initial range has to be an rvalue. Owning views can also (and usually should) be created with a range factory: `std::views::all(rg)`. In addition, almost all other range adaptors also create an owning view if an rvalue is passed that is not a view yet.
+
+5) The class template `std::ranges::common_view<>` is a view that harmonizes the begin and end iterator types of a range to be able to pass them to code where the same iterator type is required (such as to constructors of containers or traditional algorithms). It is better to use the range adaptor `std::views::common()` to create a common view. Note that by using the adaptor, it is not a compile-time error to create a common view from a range that is already common. This is the key reason to prefer the adaptor over directly initializing the view.
+
+6) The class template `std::ranges::iota_view<>` is a view that generates a sequence of values. Iota views can also (and usually should) be created with a range factory: `std::views::iota(val)` or `std::views::iota(val, endVal)`. 
+
+7) The class template `std::ranges::single_view<>` is a view that owns one element. Unless the value type is const, you can even modify the value. Single views can also (and usually should) be created with a range factory: `std::views::single(val)`
+
+8) The class template `std::ranges::empty_view<>` is a view with no elements. However, you have to specify the element type. Empty views can also (and usually should) be created with a range factory, which is a variable template: `std::views::empty<type>`.
+
+9) The class template `std::ranges::take_view<>` defines a view that refers to the first num elements of a passed range. If the passed range does not have enough elements, the view refers to all elements. Take views can also (and usually should) be created with a range adaptor: `std::views::take(rg, n)`. The class template `std::ranges::take_while_view<>` defines a view that refers to all leading elements of a passed range that match a certain predicate. Take-while views can be created with the adaptor `std::views::take_while(rg, pred)`. The passed predicate must be a callable that satisfies the concept `std::predicate`. This implies the concept `std::regular_invocable`, which means that the predicate should never modify the passed value of the underlying range. The predicate should at least be declared to take the argument by value or by const reference.
+
+10) The class template `std::ranges::drop_view<>` defines a view that refers to all but the first numments of a passed range. It yields the opposite elements to the take view. Drop views can also (and usually should) be created with a range adaptor: `std::views::drop(rg, n)`. Note that the adaptor might not always yield a `drop_view`. The begin iterator is initialized and cached with the first call of begin(). On a range without random access this takes linear time. Therefore, it is better to reuse a drop view than to create it again from scratch. Note that for ranges that have random access (e.g., arrays, vectors, and deques), the cached offset for the beginning is copied with the view. As a rule of thumb, do not use a drop view after the underlying range has been modified. Note that you cannot always iterate over a const drop view. In fact, the referenced range has to be a random-access range and a sized range. There is also `std::ranges::drop_while_view<>`.
+
+11) The class template `std::ranges::filter_view<>` defines a view that iterates only over those elements of the underlying range for which a certain predicate matches. Filter views can also (and usually should) be created with a range adaptor. The adaptor simply passes its parameters to the `std::ranges::filter_view` constructor. The passed predicate must be a callable that satisfies the concept `std::predicate`. This implies the concept `std::regular_invocable`, which means that the predicate should never modify the passed value of the underlying range. However, not modifying the value is a semantic constraint and this cannot always be checked at compile time. As a consequence, the predicate should at least be declared to take the argument by value or by const reference. It has a significant impact on the performance of pipelines. In a pipeline, you should have it as early as possible. The begin iterator is initialized and usually cached with the first call of `begin()`. The view caches the position of the first element that matches the predicate so that `begin()` does not have to recalculate it. **When using filter views, there is an important additional restriction on write access: you have to ensure that the modified value still fulfills the predicate passed to the filter.** You cannot iterate over a const filter view. Be careful especially with expensive transformations ahead of filters: the reason for this is that views and adaptors in front of the filter view might have to evaluate elements multiple times, once to decide whether they pass the filter and once to finally use their value.
+
+12) The class template `std::ranges::transform_view<>` defines a view that yields all elements of an underlying range after applying a passed transformation. The transform view yields values that have the return type of the transformation. 
+
+13) The class template `std::ranges::elements_view<>` defines a view that selects the idx-th member/attribute/element of all elements of a passed range.  The view calls `get<idx>(elem)` for each element.
+
+14) The class template `std::ranges::keys_view<>` defines a view that selects the first member/attribute/element from the elements of a passed range. It is nothing but a shortcut for using the elements view with the index 0. That is, it calls `get<0>(elem)` for each element. The class template `std::ranges::values_view<>` defines a view that selects the second member/attribute/element from the elements of a passed range. It is nothing but a shortcut for using the elements view with the index 1. That is, it calls `get<1>(elem)` for each element.
+
+15) The class template `std::ranges::reverse_view<>` defines a view that iterates over the elements of the underlying range in the opposite order. A reversed reversed range yields the original range. For better performance, reverse views cache the result of `begin()` in the view (unless the range is only an input range). Note that you cannot always iterate over a const reverse view.
+
+16) Both class templates `std::ranges::split_view<>` and `std::ranges::lazy_split_view<>` define a view that refers to multiple sub-views of a range separated by a passed separator.
+    ```c++
+    std::vector<int> rg{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+    for (const auto& sub : rg | std::views::split(5)) {
+        for (const auto& elem : sub) {
+            std::cout << elem << ' ';
+        }
+        std::cout << '\n';
+    }
+    ```
+    This prints 
+    ```
+    1 2 3 4
+    6 7 8 9 10 11 12 13
+    ```
+    Note that you cannot iterate over a const split view. To support generic code, you have to use universal/forwarding references. Alternatively, you can use a `lazy_split_view`. Then, however, the sub-view elements can only be used as forward ranges.
+
+17) The class template `std::ranges::join_view<>` defines a view that iterates over all elements of a view of multiple ranges:
+
+    ```c++
+    std::vector<int> rg1{1, 2, 3, 4};
+    std::vector<int> rg2{0, 8, 15};
+    std::vector<int> rg3{5, 4, 3, 2, 1, 0};
+    std::array coll{rg1, rg2, rg3};
+    for (const auto& elem : std::views::join(coll)) {
+        std::cout << elem << ' ';
+    }
+    ```
+
+    This prints
+    ```
+    1 2 3 4 0 8 15 5 4 3 2 1 0
+    ```
+
+    You can use a join view to join elements of multiple arrays:
+
+    ```c++
+    int arr1[]{1, 2, 3, 4, 5};
+    int arr2[] = {0, 8, 15};
+    int arr3[10]{1, 2, 3, 4, 5};
+    std::array<std::ranges::subrange<int*>, 3> coll{arr1, arr2, arr3};
+    for (const auto& elem : std::ranges::join_view{coll}) {
+        std::cout << elem << ' ';
+    }
+    ```
+
+    The join view is the only view in C++20 that deals with ranges of ranges.
+
+## Chapter 9: Spans
