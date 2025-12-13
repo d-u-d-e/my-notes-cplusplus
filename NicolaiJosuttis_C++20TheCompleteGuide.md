@@ -355,3 +355,33 @@ Note that before C++20, we could also have these kinds of sentinels but they wer
     is valid, although in general, **it is a fatal runtime error to use a reference to a temporary as a collection a range-based for loop iterates over** (the lifetime of any temporary within range_expression is not extended, but it's okay to just have a temporary). Because passing a temporary range object (rvalue) moves the range into an `owning_view`, the view does not refer to an external container and therefore there is no runtime error.
 
 15) Modifying leading elements of ranges (changing their value or inserting/deleting elements) may invalidate views if and only if `begin()` has already been called before the modification. Therefore, iterating over the elements of a view might invalidate a later use if its referred range has been modified in the meantime.
+
+## Chapter 8: View Types in Detail
+
+1) The class template `std::ranges::subrange<>` defines a view to the elements of a range that is usually passed as a pair of begin iterator and sentinel (end iterator).  Internally, the view itself represents the elements by storing begin (iterator) and end (sentinel). The major use case of the subrange view is to convert a pair of begin iterator and sentinel (end iterator) into one object. For example:
+    ```c++
+    std::vector<int> coll{0, 8, 15, 47, 11, -1, 13};
+    std::ranges::subrange s1{std::ranges::find(coll, 15),
+    std::ranges::find(coll, -1)};
+    print(coll); // 15 47 11
+    ```
+
+2) The type of subranges depends only on the type of the iterators (and whether or not size() is provided). This can be used to harmonize the type of raw arrays:
+    ```c++
+    int a1[5] = { ... };
+    int a2[10] = { ... };
+    std::same_as<decltype(a1), decltype(a2)> // false
+    std::same_as<decltype(std::ranges::subrange{a1}), decltype(std::ranges::subrange{a2})> // true
+    ```
+
+3) The class template `std::ranges::ref_view<>` defines a view that simply refers to a range. That way, passing the view by value has an effect like passing the range by reference. The effect is similar to type `std::reference_wrapper<>`. Passing a container to a coroutine, which usually has to take parameters by value, may be one application of this technique. Note that you can only create a ref view to an lvalue (a range that has a name). For an rvalue, you have to use an owning view. Ref views can also (and usually should) be created with a range factory: `std::views::all(rg)`. Note that all other views that take a range indirectly call all() for that passed range (by using `std::views::all_t<>`). For that reason, a ref view is almost always created automatically if you pass an lvalue that is not a view to one of the views.
+
+4) The class template `std::ranges::owning_view<>` defines a view that takes ownership of the elements of another range. This is the only view (so far) that might own multiple elements. However, construction is still cheap, because an initial range has to be an rvalue. Owning views can also (and usually should) be created with a range factory: `std::views::all(rg)`. In addition, almost all other range adaptors also create an owning view if an rvalue is passed that is not a view yet.
+
+5) The class template `std::ranges::common_view<>` is a view that harmonizes the begin and end iterator types of a range to be able to pass them to code where the same iterator type is required (such as to constructors of containers or traditional algorithms). It is better to use the range adaptor `std::views::common()` to create a common view. Note that by using the adaptor, it is not a compile-time error to create a common view from a range that is already common. This is the key reason to prefer the adaptor over directly initializing the view.
+
+6) The class template `std::ranges::iota_view<>` is a view that generates a sequence of values. Iota views can also (and usually should) be created with a range factory: `std::views::iota(val)` or `std::views::iota(val, endVal)`. 
+
+7) The class template `std::ranges::single_view<>` is a view that owns one element. Unless the value type is const, you can even modify the value. Single views can also (and usually should) be created with a range factory: `std::views::single(val)`
+
+8) The class template `std::ranges::empty_view<>` is a view with no elements. However, you have to specify the element type. Empty views can also (and usually should) be created with a range factory, which is a variable template: `std::views::empty<type>`.
