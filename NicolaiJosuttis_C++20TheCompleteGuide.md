@@ -449,3 +449,24 @@ Note that before C++20, we could also have these kinds of sentinels but they wer
     The join view is the only view in C++20 that deals with ranges of ranges.
 
 ## Chapter 9: Spans
+
+1) A span with a specified fix number of elements is called a span with fixed extent. It is declared by specifying the element type and the size as template parameters or by initializing it either with an array (raw array or `std::array<>`) or with an iterator and a size. For such a span, the member function size() always yields the size specified as part of the type. A span where the number of elements is not stable over its lifetime is called a span with dynamic extent. The number of elements depends on the sequence of elements the span refers to and might change due to the assignment of a new underlying range.
+
+2) Note that declaring the span itself as `const` does not provide read-only access to the referenced elements (as usual for views, const is not propagated).
+
+3) The fact that spans perform element access with raw pointers to the memory means that a span type erases the information of where the elements are stored. A span to the elements of a vector has the same type as a span to the elements of an array (provided they have the same extent). However, note that class template argument deduction for spans deduces a fixed extent from arrays and a dynamic extent from vectors.
+
+4) One difference with subranges is that spans do not require iterator support for the type they refer to. You can pass any type that provides a `data()` member for access to a sequence of elements.
+
+5) Spans are views that have reference semantics. In that sense, they behave like pointers: if a span is const, it does not automatically mean that the elements the span refers to are const.
+
+6) `std::ranges::cbegin` is broken for spans (and for views) until C++23 since it returns an iterator to the first element of the const-qualified argument. Since C++23 it returns a **constant** iterator to the first element of the argument. However `std::cbegin()` is still broken as of C++23.
+
+7) One property of spans is that they are borrowed ranges, meaning that the lifetime of iterators does not depend on the lifetime of the span. For that reason, we can use a temporary span as a range in algorithms that yield iterators to it.
+    ```c++
+    std::vector<int> coll{25, 42, 2, 0, 122, 5, 7};
+    auto pos1 = std::ranges::find(std::span{coll.data(), 3}, 42); // OK
+    std::cout << *pos1 << '\n';
+    ```
+
+## Chapter 10: Formatted Output
