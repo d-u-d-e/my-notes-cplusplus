@@ -565,3 +565,107 @@ API to let threads block and wait for changes of their values caused by other th
     ```
 
 ## Chapter 17: Lambda Extensions
+
+1) C++20 introduces an extension to enable the use of template parameters for generic lambdas:
+    ```c++
+    auto foo = []<typename T>(const T& param) { // OK since C++20
+        T tmp{}; // declare object with type of the template parameter
+        ...
+    };
+    ```
+    If you are wondering why you would not use a function template in these cases, remember that lambdas provide some benefits that functions cannot provide: they can be defined inside functions, they can capture runtime values, you can pass them as arguments without the need to specify the parameter types.
+
+    Explicit template parameters help to avoid the need for `decltype`:
+
+    ```c++
+    []<typename... Types>(Types&&... args) {
+        foo(std::forward<Types>(args)...);
+    };
+    ```
+    rather than
+    ```c++
+    [] (auto&&... args) {
+        foo(std::forward<decltype(args)>(args)...);
+    };
+    ```
+2) Since C++20, lambdas with no captures have a default constructor and an assignment operator. Some STL containers accept lambdas as arguments, like:
+    ```c++
+    auto lessName = [] (const Customer& c1, const Customer& c2) {
+        return c1.getName() < c2.getName(); 
+    };
+    std::set<Customer, decltype(lessName)> coll1{lessName};
+    ```
+    Before C++20 you had to specify the type and pass the lambda to the constructor of the container. Now since lambdas with no captures have a default constructor, it's enough to pass the type:
+
+    ```c++
+    std::set<Customer, decltype(lessName)> coll1;
+    ```
+    You can even define the lambda inside the container type, passing it to `decltype`.
+
+3) Since C++20, lambdas can be used as non-type template parameters (NTTPs):
+    ```c++
+    template<std::invocable auto GetVat>
+    int addTax(int value)
+    {
+        return static_cast<int>(std::round(value * (1 + GetVat())));
+    }
+    auto defaultTax = [] {
+        return 0.19;
+    };
+
+    std::cout << addTax<defaultTax>(100) << '\n';
+    ```
+
+4) By using the new `consteval` keyword with lambdas, you can now require that lambdas become immediate functions so that “function calls” of them have to be evaluated at compile time:
+    ```c++
+    auto hashed = [] (const char* str) consteval {
+        ...
+    };
+    auto hashWine = hashed("wine"); // hash() called at compile time
+    ```
+
+5) The implicit capture of `*this` is deprecated. `[=, this]` is now allowed as a lambda capture. Since C++20, the capture of structured bindings (introduced with C++17) is allowed. C++20 introduces a syntax to use init-captures with parameter packs (previously using `[&]` you would return a lambda that refers to a destroyed parameter pack, while  using `[args...]` or `[=]` you would copy the passed parameter pack):
+    ```c++
+    template<typename... Args>
+    void foo(Args... args)
+    {
+        auto l4 = [...args = std::move(args)] { // OK since C++20
+            bar(args...);
+        };
+    }
+    ```
+
+    You can also capture all by reference:
+
+    ```c++
+    template<typename... Args>
+    void foo(Args... args)
+    {
+        auto l4 = [&...fooArgs = args] {  // OK since C++20
+            bar(fooArgs...);
+        };
+    }
+    ```
+
+6) Here's an example with the abbreviated syntax:
+    ```c++
+    auto createToCall(auto op, auto... args)
+    {
+        return [op, ...args = std::move(args)] () -> decltype(auto) {
+            return op(args...);
+        };
+    }
+
+    void printWithGAndNoG(std::string_view s)
+    {
+        std::cout << s << "g " << s << '\n';
+    }
+
+    int main()
+    {
+        auto printHero = createToCall(printWithGAndNoG, "Zhan");
+        printHero();
+    }
+    ```
+
+## Chapter 18: Compile-Time Computing
