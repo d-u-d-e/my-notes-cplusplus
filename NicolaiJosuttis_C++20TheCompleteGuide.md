@@ -513,3 +513,55 @@ and `std::format_to_n()` require that the format string is a compile-time value.
 4) C++20 provides stop tokens not only for threads. It is a general-purpose mechanism to asynchronously request to stop with various ways to react to this request. The first step is simply to create the `stop_source` object, which provides the API to request a stop. The constructor also creates the associated shared stop state in the heap. Then, you can ask the stop source for the `stop_token` object, which provides the API to react to a stop request. You can then pass the token (and/or the source) to locations/threads to establish the asynchronous communication between the places that might request a stop and those that might react to a stop. A stop callback is an object of the RAII type `std::stop_callback`. The constructor registers a callable (function, function object, or lambda) to be called when a stop is requested for a specified stop token. The callable is called in the thread that requested the stop if the callback has already been initialized without the destructor being called. If the callback has not been initialized by the time the stop request is made, it is called in the thread where it is initialized. If it has been destroyed, it won't be called. The destructor of a callback waits for its callable to finish if it is just called by another thread. A callback should not throw.
 
 ## Chapter 13: Concurrency Features
+
+1) A **latch** is a new synchronization mechanism for concurrent execution that supports a single-use asynchronous countdown. Starting with an initial integral value, various threads can atomically count this value down to zero. The moment the counter reaches zero, all threads waiting for this countdown continue. One application of this is to ensure (as well as possible) that multiple threads start their actual work together even when starting and initializing the threads might take some time.
+
+2) A **barrier** is a new synchronization mechanism for concurrent execution that allows you to synchronize multiple asynchronous tasks multiple times. After setting an initial count, multiple threads can count it down and wait until the counter reaches zero. However, in contrast to latches, when zero is reached, an (optional) callback is called and the counter reinitializes to the initial count again. A barrier is useful when multiple threads repeatedly compute/perform something together. Whenever all threads have done their task, the optional callback can process the result or new state and after that, the asynchronous computation/processing can continue with the next round. Note that the callback is called by the thread that finally decremented the counter to zero. Note that the C++ standard requires that callbacks for barriers guarantee not to throw.
+
+3) C++20 introduced new types for dealing with semaphores: `std::counting_semaphore<>` to limit the use of multiple resources up to a maximum value, and `std::binary_semaphore<>` to limit the use of a single resource.
+
+4) C++20 now introduces the class template `std::atomic_ref<>` to provide an atomic API for trivially copyable reference types.
+
+5) All atomic types (`std::atomic<>`, `std::atomic_ref<>`, and `std::atomic_flag`) now provide a simple
+API to let threads block and wait for changes of their values caused by other threads:
+    ```c++
+    int value = 100;
+    std::atomic_ref<int> aVal{value};
+    int lastValue = aVal.load();
+    aVal.wait(lastValue); // block unless/until value changed (and notified)
+    ```
+
+    However, as for condition variables, `wait()` might end due to a spurious wake-up.
+
+    ```c++
+    while ((int val = aVal.load()) != expectedVal) {
+        aVal.wait(val);
+        // here, aVal may or may not have changed
+    }
+    ```
+
+    **Note that there is no guarantee that you will get all updates.**
+
+6) C++20 provides a new mechanism for synchronizing concurrent output to streams. We only have to use a `std::osyncstream` initialized with the corresponding output stream. There is also a manipulator for writing the output before the destructor is called: `std::flush_emit`:
+    ```c++
+    std::osyncstream coutSync{std::cout};
+    for (int i = 0; i < num ; ++i) {
+        coutSync << "squareroot of " << i << " is " << std::sqrt(i) << '\n' << std::flush_emit;
+    }
+    ```
+    If we had left out the flush emit, the entire output would have been printed all at once when the sync stream’s destructor was reached. For output streams that are not synchronized, it has no effect.
+
+7) With this definition:
+    ```c++
+    inline auto syncOut(std::ostream& strm = std::cout) {
+        return std::osyncstream{strm};
+    }
+    ```
+    you can simply use `syncOut()` instead of `std::cout` to ensure that concurrent output is written line by line. For example:
+    ```c++
+    void foo(std::string name) {
+    syncOut() << "calling foo(" << name << ") in thread " << std::this_thread::get:id() << '\n';
+    }
+    ```
+
+## Chapter 17: Lambda Extensions
