@@ -492,3 +492,24 @@ and `std::format_to_n()` require that the format string is a compile-time value.
     You don't have to reinvent the wheel for specifiers. You can create a local formatter and delegate to it, like `std::formatter<int>`, or you can just inherit from it, so the parse function is automatically available.
 
 ## Chapter 12: std::jthread and Stop Tokens
+
+1) C++20 introduces a new type for representing threads: `std::jthread`. `std::thread`has a severe design flaw: it is not an RAII type. `std::thread` requires that at the end of its lifetime if representing a running thread, either `join()` (to wait for the end of the thread) or `detach()` (to let the thread run in the background) is called. If neither has been called, the destructor immediately causes an abnormal program termination. Before calling `join()`, you should make sure that the thread you wait for will cancel its execution. However, with `std::thread`, there is no mechanism for that. You have to implement the request for cancellation and the reaction to it yourself.
+
+2) The class `std::jthread` provides a mechanism for signaling cancellation using stop tokens. To react to the stop request, the callable can add a new optional first parameter of type `std::stop_token` and check from time to time whether a stop was requested:
+    ```c++
+    void task (std::stop_token st,
+    std::string s, double value)
+    {
+        while (!st.stop_requested()) { // stop requested (e.g., by the destructor)?
+        ... // ensure we check from time to time
+        }
+    }
+    ```
+
+    You can also manually request a stop for a jthread that has started by calling `request_stop()` on the thread object.
+
+3) You can call `wait()` for a condition variable with a passed stop token so that the wait is suspended when a stop is requested. For technical reasons, you have to use the type `std::condition_variable_any` for the condition variable.
+
+4) C++20 provides stop tokens not only for threads. It is a general-purpose mechanism to asynchronously request to stop with various ways to react to this request. The first step is simply to create the `stop_source` object, which provides the API to request a stop. The constructor also creates the associated shared stop state in the heap. Then, you can ask the stop source for the `stop_token` object, which provides the API to react to a stop request. You can then pass the token (and/or the source) to locations/threads to establish the asynchronous communication between the places that might request a stop and those that might react to a stop. A stop callback is an object of the RAII type `std::stop_callback`. The constructor registers a callable (function, function object, or lambda) to be called when a stop is requested for a specified stop token. The callable is called in the thread that requested the stop if the callback has already been initialized without the destructor being called. If the callback has not been initialized by the time the stop request is made, it is called in the thread where it is initialized. If it has been destroyed, it won't be called. The destructor of a callback waits for its callable to finish if it is just called by another thread. A callback should not throw.
+
+## Chapter 13: Concurrency Features
