@@ -470,3 +470,25 @@ Note that before C++20, we could also have these kinds of sentinels but they wer
     ```
 
 ## Chapter 10: Formatted Output
+
+1) The implementation of `std::format()` has a pretty good performance when compared with other ways of formatting. However, memory has to be allocated for the resulting string. To save time, you can use `std::format_to_n()`, which writes to a preallocated array of characters. You have to specify both the buffer to write to and its size.
+
+2) The functions `std::format()`, `std::format_to()`,
+and `std::format_to_n()` require that the format string is a compile-time value. You have to pass a string literal or a constexpr string. Of course, applications sometimes have to compute formatting details at runtime. In that case, you have to use `std::vformat()` or `std::vformat_to()` and pass all arguments with `std::make_format_args()`.
+
+3) C++20 specifies a standard formatting of chrono types, in addition to arithmetic types, strings, and raw pointers.
+
+4) If a format failure is detected at runtime, an exception of type `std::format_error` is thrown.
+
+5) A formatter is a specialization of the class template `std::formatter<>` for your type `T`. Inside the formatter, two member functions have to be defined:
+    - `parse()` to implement how to parse the format string specifiers for your type
+    - `format()` to perform the actual formatting for an object/value of your type
+
+    The parse function has the following signature: `constexpr auto parse(std::format_parse_context& ctx)`. `ctx.begin()` points to the first character of the format specifier for the value to be parsed or the `}` if there is no specifier.
+
+    The format function has the following signature:
+    `auto format(const T& value, std::format_context& ctx) const`. A `std::format_context` provides the API to write the resulting characters of the formatting. Inside parse you can throw a `std::format_error`. The compiler catches it at compile time to validate the specifier.
+
+    You don't have to reinvent the wheel for specifiers. You can create a local formatter and delegate to it, like `std::formatter<int>`, or you can just inherit from it, so the parse function is automatically available.
+
+## Chapter 12: std::jthread and Stop Tokens
