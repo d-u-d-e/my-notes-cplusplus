@@ -854,3 +854,35 @@ template parameters.
         ```
 
 ## Chapter 21: Small Improvements for the Core Language
+
+1) C++17 introduced optional initialization for the if and switch control structures. C++20 now introduces such an optional initialization for the range-based for loop.
+
+2) To make the use of scoped enumeration types more convenient, you can now use a `using enum` declaration.
+
+3) Using enum declarations can also be used to delegate enumeration values to different scopes:
+
+    ```c++
+    namespace MyProject {
+    class Task {
+    public:
+        enum class Status{open, progress, done = 9};
+        Task();
+    };
+
+    // expose the values of Status to MyProject
+    using enum Task::Status;
+    }
+
+    // OK: x has value MyProject::Task::open
+    auto x = MyProject::open;
+    ```
+
+    note that the using enum declaration exposes only the values, not the type. To expose the type you need an ordinary type alias: `using Status = Task::Status;`.
+
+4) Before C++20, you could only use curly braces to initialize aggregates with values. Since C++20, you can also use parentheses as outer characters for a direct initialization without =.
+
+5) The new attributes `[[likely]]` and `[[unlikely]]` were introduced by C++20 to help the compiler when performing branch optimizations.
+
+6) You can pass a string literal to `[[nodiscard]]` to be displayed by the compiler.
+
+## Chapter 22: Small Improvements for Generic Programming
