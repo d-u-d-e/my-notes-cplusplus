@@ -825,3 +825,32 @@ template parameters.
 4) Note the following constraints for using lambdas as non-type template parameters: The lambda may not capture anything, It must be possible to use the lambda at compile time. Fortunately, since C++17, any lambda is implicitly constexpr provided it uses only features that are valid for compile-time computing.
 
 ## Chapter 20: New Type Traits
+
+1) `std::common_reference_t<T...>` yields the common type (if there is one) of all types T... to which you can assign a value. Therefore, given types T1, T2, and T3, the trait yields the type where you can assign values of all three types.
+
+2) `std::type_identity_t<T>` yields just type T. This type trait has a surprising number of use cases:
+    - You can disable the fact that a parameter is used to deduce a template parameter:
+        ```c++
+        template<typename T>
+        void insert(std::vector<T>& coll, const std::type_identity_t<T>& value)
+        {
+            coll.push_back(value);
+        }
+
+        std::vector<double> coll;
+        insert(coll, 42);
+        // OK: type of 42 not used to deduce type T
+        ```
+        If the parameter value were to be declared with just `const T&`, the compiler would raise an error because it would deduce two different types for type T (double and int).
+    - You can use it as a building block to define type traits that yield types:
+        ```c++
+        template<typename T>
+        struct remove_const : std::type_identity<T> {
+        };
+
+        template<typename T>
+        struct remove_const<const T> : std::type_identity<T> {
+        };
+        ```
+
+## Chapter 21: Small Improvements for the Core Language
