@@ -886,3 +886,40 @@ template parameters.
 6) You can pass a string literal to `[[nodiscard]]` to be displayed by the compiler.
 
 ## Chapter 22: Small Improvements for Generic Programming
+
+1) Since C++20, you can skip `typename` in contexts where it is clear that a type is passed. For example:
+
+    ```c++
+    template<typename T>
+    typename T::value_type getElem(const T& cont, typename T::iterator pos)
+    {
+        using Itor = typename T::iterator;
+        typename T::value_type elem;
+        ...
+        return elem;
+    }
+    ```
+
+    becomes:
+
+    ```c++
+    template<typename T>
+    T::value_type getElem(const T& cont, typename T::iterator pos)
+    {
+        using Itor = T::iterator;
+        typename T::value_type elem;
+        ...
+        return elem;
+    }
+    ```
+
+    The most important places where you can skip typename now are:
+    - When declaring return types 
+    - When declaring members in class templates
+    - When declaring parameters of member or friend functions in class templates or lambda
+    - When declaring parameters of `requires` expressions
+    - For the types in alias declarations (those using `using`)
+
+    There are other subtle cases (see page 675).
+
+676
