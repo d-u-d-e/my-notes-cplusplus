@@ -811,3 +811,17 @@ API to let threads block and wait for changes of their values caused by other th
     A similar trick can be done to return strings computed at compile time.
 
 ## Chapter 19: Non-Type Template Parameter (NTTP) Extensions
+
+1) Since C++20, you can use new types for non-type template parameters: Floating-point types, Structures and simple classes, Lambdas. You can use an object/value of a data structure or class as a non-type template parameter provided all members are public and the type is a literal type. As a consequence, you can now use compile-time objects of types `std::pair<>` and `std::array<>` as
+template parameters.
+
+2) The class or data structure used as  NTTP must be a structural type. This roughly means:
+    - All base classes (if there are any) are inherited publicly and also structural types
+    - The type is a literal type (is either an aggregate or has a constexpr constructor, no copy/move constructor, no destructor, no copy/move constructor or destructor, and where every initialization of data members is a constant expression)
+    -  All non-static members are public and not mutable and use only structural types or arrays thereof
+
+3) Note that a data structure that has a character array as a public member is a structural type. That way, we can now quite easily pass string literals as template arguments.
+
+4) Note the following constraints for using lambdas as non-type template parameters: The lambda may not capture anything, It must be possible to use the lambda at compile time. Fortunately, since C++17, any lambda is implicitly constexpr provided it uses only features that are valid for compile-time computing.
+
+## Chapter 20: New Type Traits
