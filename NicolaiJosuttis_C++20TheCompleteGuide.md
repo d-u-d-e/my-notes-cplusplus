@@ -922,4 +922,31 @@ template parameters.
 
     There are other subtle cases (see page 675).
 
-676
+2) Since C++17, constructors can be used to deduce template parameters of class templates. However, even for simple aggregates, a similar deduction according to the way objects are initialized was not supported, and you had to use deduction guides:
+
+    ```c++
+    template<typename T>
+    struct Aggr {
+        T value;
+    };
+    Aggr<int> a1{42}; // OK
+    Aggr a2{42}; // ERROR before C++20
+
+    template<typename T>
+    Aggr(T) -> Aggr<T>; 
+    ```
+    Since C++20, there is no longer any need for a deduction guide.
+
+3) The way to specify a conditional explicit is like specifying a conditional `noexcept`. Directly after `explicit`, you can specify a Boolean compile-time expression in parentheses.
+
+## Chapter 23: Small Improvements for the C++ Standard Library
+
+1) Sometimes, it is important to let the program deal with the location of the source code that is currently being processed. C++20 introduces a type-safe feature for that: `std::source_location::current()` is a static `consteval` function that yields an object for the current source location. Details such as the exact format of the function name and the exact position of the column might differ depending on implementation. 
+
+2) C++20 provides functions for safe integral comparisons in `<utility>` (eg between signed and unsigned integers).
+
+3) We have `std::ssize()` to get a signed size for a container.
+
+4) C++20 introduces constants for the most important mathematical floating-point constants.
+
+5) C++20 introduces a new header file `<version>`. This header file provides no active functionality. Instead, it provides all implementation-specific general information about the C++ standard library being used. Because this header file is short and fast to load, tools can include this header file to get all necessary information to make decisions based on the feature set provided or find all information they need to deal with general information of the library used.
