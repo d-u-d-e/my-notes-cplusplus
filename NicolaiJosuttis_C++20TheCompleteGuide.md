@@ -669,3 +669,145 @@ API to let threads block and wait for changes of their values caused by other th
     ```
 
 ## Chapter 18: Compile-Time Computing
+
+1) One new keyword C++20 introduces is `constinit`. It can be used to force and ensure that a mutable static or global variable is initialized at compile time. Roughly speaking, the effect is described as: `constinit = constexpr - const`.
+
+2) You cannot initialize a constinit value with another constinit value. The reason is that the initial value must be a constant value known at compile time,  but constinit values are not constant. When initializing objects, a compile-time constructor is required. However, a compile-time destructor is not required. For this reason, you can use constinit for smart pointers.
+
+3) `constinit` does not imply `inline` (this is different from `constexpr`).
+
+4) In C++, there is a problem called *static initialization order fiasco*, which constinit can solve. The problem is that the order of static and global initializations in different translation units is not defined. constinit ensures that an object is always initialized before it is used because the initialization happens at compile time.
+
+5) `constexpr` functions also serve as “normal” runtime functions. C++20 introduces a similar keyword `consteval`, which mandates compile-time computing. Functions marked with `consteval` cannot be called at runtime; instead, they are required to be called at compile time. You can also declare lambdas to be consteval now. This requires that the lambda is evaluated at compile time (since C++17, all lambdas are implicitly constexpr if possible). consteval functions are implicitly inline. Parameters and the return type (if it is not void) have to be literal types.  constexpr functions cannot call consteval functions for variables known at runtime.
+
+6) Functions marked with consteval are also not permitted to call pure runtime functions (functions marked with neither constexpr nor consteval). However, this is only checked if the call is really performed. For a consteval function, it is not an error to contain statements that call runtime functions as long as they are not reached. By using this trick, you can constrain compile-time functions to certain values:
+    ```c++
+    void compileTimeError()
+    {
+
+    }
+
+    consteval int nextTwoDigitValue(int val)
+    {
+        if (val < 0 || val >= 99) {
+            compileTimeError();
+        }
+        return ++val;
+    }
+
+    constexpr int i1 = nextTwoDigitValue(0); // OK
+    constexpr int i2 = nextTwoDigitValue(99); // ERROR
+
+    ```
+
+7) **The constraints for constexpr and consteval functions are now as follows**:
+    -  Parameters and the return type (if there is one) must be literal types.
+    -  The body may define only variables of literal types. These variables may neither be `static` nor `thread_local`.
+    -  Using `goto` and labels is not allowed.
+    - The functions cannot be used as coroutines
+    -  Constructors and destructors may be compile-time functions only if the class has no virtual base class.
+
+8) C++20 provides a new helper function that allows programmers to implement different code for compile-time and runtime computing: `std::is_constant_evaluated()`:
+
+    ```c++
+    constexpr int len(const char* s)
+    {
+        if (std::is_constant_evaluated()) {
+            int idx = 0;
+            while (s[idx] != '\0') {
+                // compile-time friendly code
+                ++idx;
+            }
+            return idx;
+        }
+        else {
+            return std::strlen(s);
+            // function called at runtime
+        }
+    }
+    ```
+
+    it makes no sense to use `std::is_constant_evaluated()` in the following situations: ss a condition in a compile-time if because that always yields true, inside a pure runtime function, because that usually yields false, inside a consteval function, because that always yields true. Therefore, using `std::is_constant_evaluated()` usually only makes sense in `constexpr` functions. It also makes no sense to use `std::is_constant_evaluated()` inside a constexpr function to call a consteval function, because calling a consteval function from a constexpr function is not allowed in general:
+
+    ```c++
+    consteval int funcConstEval(int i) {
+        return i;
+    }
+
+    constexpr int foo(int i) {
+        if (std::is_constant_evaluated()) {
+            return funcConstEval(i); // ERROR
+        }
+        else {
+            return funcRuntime(i);
+        }
+    }
+    ```
+
+    C++23 allows this with `if consteval` (followed by no codition).
+
+9) Since C++20, compile-time functions can allocate memory **provided the memory is also released at compile time**. For this reason, you can now use strings or vectors at compile time. However, there is an important constraint: the strings or vectors created at compile time cannot be used at runtime. The reason is that memory allocated at compile time also has to be released at compile time:
+
+    ```c++
+    template<std::ranges::input_range T>
+    constexpr auto modifiedAvg(const T& rg)
+    {
+        using elemType = std::ranges::range_value_t<T>;
+        // initialize compile-time vector with passed elements:
+        std::vector<elemType> v{std::ranges::begin(rg),
+        std::ranges::end(rg)};
+        // perform several modifications:
+        v.push_back(elemType{});
+        std::ranges::sort(v);
+        auto newEnd = std::unique(v.begin(), v.end());
+        // return average of modified vector:
+        auto sum = std::accumulate(v.begin(), newEnd,
+        elemType{});
+        return sum / static_cast<double>(v.size());
+    }
+
+    int main()
+    {
+        constexpr std::array orig{0, 8, 15, 132, 4, 77};
+        constexpr auto avg = modifiedAvg(orig);
+        std::cout << "average: " << avg << '\n';
+    }
+
+    ```
+
+    Due to the fact that `avg` is declared with constexpr, `modifiedAvg()` is evaluated at compile time. Note that at the end we don't return a vector, but a value computed with the help of a compile-time vector.
+
+10) Although you cannot return a compile-time vector so that it can be used at runtime, there is a way to return a collection of elements computed at compile time: you can return a `std::array<>`. The only problem is that you need to know the size of the array. If we do not know the resulting size of the array at compile time, we have to declare the returned array with a maximum size and return the resulting size in addition:
+
+    ```c++
+    template<std::ranges::input_range T>
+    consteval auto mergeValuesSz(T rg, auto... vals)
+    {
+        // create compile-time vector from passed range:
+        std::vector<std::ranges::range_value_t<T>> v{std::ranges::begin(rg), std::ranges::end(rg)};
+        (... , v.push_back(vals));
+        std::ranges::sort(v);
+        // return extended collection as array and its size:
+        constexpr auto maxSz = std::ranges::size(rg) + sizeof...(vals);
+        std::array<std::ranges::range_value_t<T>, maxSz> arr{};
+        auto res = std::ranges::unique_copy(v, arr.begin());
+        return std::pair{arr, res.out - arr.begin()};
+    }
+
+    int main()
+    {
+        // compile-time initialization of array:
+        constexpr std::array orig{0, 8, 15, 132, 4, 77, 3};
+        // initialization of sorted extended array:
+        auto tmp = mergeValuesSz(orig, 42, 4);
+        auto merged = std::views::counted(tmp.first.begin(), tmp.second);
+        // print elements:
+        for(const auto& i : merged) {
+            std::cout << i << ' ';
+        }
+    }
+    ```
+
+    A similar trick can be done to return strings computed at compile time.
+
+## Chapter 19: Non-Type Template Parameter (NTTP) Extensions
