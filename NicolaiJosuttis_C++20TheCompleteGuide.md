@@ -950,3 +950,309 @@ template parameters.
 4) C++20 introduces constants for the most important mathematical floating-point constants.
 
 5) C++20 introduces a new header file `<version>`. This header file provides no active functionality. Instead, it provides all implementation-specific general information about the C++ standard library being used. Because this header file is short and fast to load, tools can include this header file to get all necessary information to make decisions based on the feature set provided or find all information they need to deal with general information of the library used.
+
+## Chapter 14: Coroutines
+
+1) C++20 introduces support for coroutines. Coroutines (invented in 1958 by Mel Conway) are functions you can suspend. Coroutines are defined implicitly just by using one of the following keywords in a function: `co_await`, `co_return`, `co_yield`. A coroutine usually returns an object that serves as the **coroutine interface** for the caller. Coroutines are stackless: they suspend execution by returning to the caller, and the data that is required to resume execution is stored separately from the stack.
+
+2) A coroutine usually lives longer than the statement it was initially called from. That has an important consequence: you can run into fatal runtime problems if you pass temporary objects by reference. Consider:
+
+    ```c++
+    CoroTask coro(const int& max)
+    {
+        std::cout << " CORO " << max << " start\n";
+        // OOPS: value of max still valid?
+        for (int val = 1; val <= max; ++val) {
+            // OOPS: value of max still valid?
+            std::cout << " CORO " << val << '/' << max << '\n';
+            co_await std::suspend_always{};
+            // SUSPEND
+        }
+        std::cout << "
+        CORO " << max << " end\n";
+    }
+
+    int main()
+    {
+       // OOPS: creates reference to temporary/literal
+        auto coroTask = coro(3);
+        std::cout << "coro(3) started\n";
+        // another temporary coroutine
+        coro(375);
+        std::cout << "coro(375) started\n";
+        // loop to resume the coroutine until it is done:
+        while (coroTask.resume()) {
+            // ERROR: undefined behavior
+            std::cout << "coro() suspended\n";
+        }
+        std::cout << "coro() done\n";
+    }
+    ```
+
+    Here 3 and 375 are temporaries that no longer exist after the statements complete, but the coroutines still reference `max`. So, in general, **do not use references to declare coroutine parameters**. If copying the parameter becomes too expensive, you can “pass by reference” by using reference wrappers created with `std::ref()` or `std::cref()`. For containers, you can use `std::views::all()` instead, which passes the container as a view.
+
+3) Coroutines can call other coroutines (even indirectly) and both the calling and the called coroutines might have suspend points.
+
+4) To deal with coroutines in C++ we need two things:
+    - A **promise type**: This type is used to define certain customization points for dealing with a coroutine.
+    - An internal **coroutine handle** of the type `std::coroutine_handle<>`:  It can be used to manage the state of the coroutine by providing a low-level interface to resume a coroutine as well as to deal with the end of the coroutine.
+
+    The class `CoroTask`, which provides promise_type, stores the coroutine handle, and defines the caller of the coroutine, may be defined as follows:
+
+    ```c++
+    // coroutine interface to deal with a simple task
+    // - providing resume() to resume the coroutine
+    class [[nodiscard]] CoroTask {
+    public:
+        // initialize members for state and customization:
+        struct promise_type; // definition later in corotaskpromise.hpp
+        using CoroHdl = std::coroutine_handle<promise_type>;
+    private:
+        CoroHdl hdl; // native coroutine handle
+    public:
+        // constructor and destructor:
+        CoroTask(auto h) : hdl{h} {
+            // store coroutine handle in interface
+        }
+        ~CoroTask() {
+            if (hdl) {
+                hdl.destroy();
+                // destroy coroutine handle
+            }
+        }
+        // don’t copy or move:
+        CoroTask(const CoroTask&) = delete;
+        CoroTask& operator=(const CoroTask&) = delete;
+        // API to resume the coroutine
+        // - returns whether there is still something to process
+        bool resume() const 
+        {
+            // nothing (more) to process?
+            if (!hdl || hdl.done()) {
+                return false;
+            }
+            hdl.resume();
+            // RESUME (blocks until suspended again or the end)
+            return !hdl.done();
+        }
+    };
+    ```
+
+    The key member the compiler looks for in a coroutine interface type is the type member `promise_type`. The type of the native coroutine handle, `std::coroutine_handle<>`, is parameterized with the promise type. That way, any data stored in the promise is part of the handle and the functions in the promise are available via the handle. The promise type has to be public to be visible from the outside. 
+    
+    The key API is `resume()`, which resumes the coroutine when it is suspended. It more or less propagates the request to resume to the native coroutine handle. It also returns whether it makes sense to resume the coroutine again. Calling `resume()` on the handle is only allowed when the coroutine is suspended and has not reached its end. Therefore, checking whether it is `done()` is necessary.
+
+    The only missing piece is the definition of the promise type. Its purpose is to:
+    - Define how to create or get the return value of the coroutine (which usually includes creating the coroutine handle)
+    - Decide whether the coroutine should suspend at its beginning or end
+    - Deal with values exchanged between the caller of the coroutine and the coroutine
+    - Deal with unhandled exceptions
+
+    Here is a typical basic implementation of the promise type for `CoroTask` and its coroutine handle type `CoroHdl`:
+
+    ```c++
+    struct CoroTask::promise_type 
+    {
+        auto get_return_object() {
+            // init and return the coroutine interface
+            return CoroTask{CoroHdl::from_promise(*this)};
+        }
+
+        auto initial_suspend() {
+            // initial suspend point
+            return std::suspend_always{}; // - suspend immediately
+        }
+
+        void unhandled_exception() {
+            // deal with exceptions
+            std::terminate();
+            // - terminate the program
+        }
+
+        void return_void() {
+            // deal with the end or co_return;
+        }
+
+        auto final_suspend() noexcept { // final suspend point
+            return std::suspend_always{}; // - suspend immediately
+        }
+    };
+    ```
+
+    `get_return_object()` is called to initialize the coroutine interface. It creates the object that is later returned to the caller of the coroutine. First, it creates the native coroutine handle for the promise, using the static function `from_promise`, and then it creates the coroutine interface object, initializing it with the handle just created.
+
+    `initial_suspend()` allows additional initial preparations and defines whether the coroutine should start eagerly or lazily.  Returning `std::suspend_never{}` means starting eagerly, while rturning `std::suspend_always{}` means starting lazily.
+
+    `return_void()` defines the reaction when reaching the end (or a `co_return;` statement). If this member function is declared, the coroutine should never return a value. If the coroutine yields or returns data, you have to use another member function instead.
+
+    `unhandled_exception()` defines how to deal with exceptions not handled locally in the coroutine.
+
+    `final_suspend()` defines whether the coroutine should be finally suspended. It should always return `std::suspend_always{}`.
+
+5) The promise is is created automatically when a coroutine is called. The coroutine state is stored in a coroutine handle and the coroutine interface is the typical place to bring everything together.
+
+6) The cheap/naive implementation of coroutine handles also makes it necessary to deal with copying and moving. By default, copying the coroutine interface would copy the coroutine handle, which would have the effect that two coroutine interfaces/handles share the same coroutine. This, of course, introduces risks when one coroutine handle brings the coroutine into a state that the other handle is not aware of. The easiest approach is to disable copying and moving. However, this then means that you cannot move coroutines around (such as storing them in a container):
+
+    ```c++
+    CoroTask& operator=(CoroTask&& c) noexcept 
+    {
+        if (this != &c) { // if no self-assignment
+            if (hdl) {
+                hdl.destroy();
+                // - destroy old handle (if there is one)
+            }
+            hdl = std::move(c.hdl); // - move handle
+            c.hdl = nullptr; // - moved-from object has no handle anymore
+        }
+        return *this;
+    }
+    ```
+
+7) By using `co_yield`, a coroutine can yield intermediate results when it is suspended. An obvious example is a coroutine that “generates” values:
+
+    ```c++
+    CoroGen coro(int max)
+    {
+        std::cout << "CORO " << max << " start\n";
+        for (int val = 1; val <= max; ++val) {
+            // print next value:
+            std::cout << "CORO " << val << '/' << max << '\n';
+            // yield next value:
+            co_yield val;
+        }
+        // SUSPEND with value
+        std::cout << "CORO " << max << " end\n";
+    }
+    ```
+
+    When the coroutine reaches `co_yield`, it suspends the coroutine, providing the value of the expression behind `co_yield`. The coroutine frame maps this to a call of `yield_value()` for the promise of the coroutine, which can define how to handle this intermediate result.  In our case, we store the value in a member of the promise, which makes it available in the coroutine interface:
+
+    ```c++
+    struct promise_type {
+        int coroValue = 0;
+        // last value from co_yield
+        auto yield_value(int val) {
+            // reaction to co_yield
+            coroValue = val; // - store value locally
+            return std::suspend_always{}; // - suspend coroutine
+        }
+        ...
+    }
+    ```
+
+    After storing the value in the promise, we return `std::suspend_always{}`, which really suspends the coroutine. We could program different behavior here, so that the coroutine (conditionally) continues. The coroutine can be used as follows:
+
+    ```c++
+    int main()
+    {
+        // start coroutine:
+        auto coroGen = coro(3);
+        std::cout << "coro() started\n";
+        // initialize coroutine
+        // loop to resume the coroutine until it is done:
+        while (coroGen.resume()) {
+            // RESUME
+            auto val = coroGen.getValue();
+            std::cout << "coro() suspended with " << val << '\n';
+        }
+        std::cout << "coro() done\n";
+    }
+    ```
+
+    The type `CoroGen` might be defined as `CoroTask`, but including the member:
+
+    ```c++
+    // - yield value from co_yield:
+    int getValue() const {
+        return hdl.promise().coroValue;
+    }
+    ```
+
+    See page 485 for an example of a generator with iterator support.
+
+8) By using `co_return`, a coroutine can return a result to the caller at its end. You just need to implement `return_value` in the promise type:
+
+    ```c++
+    void return_value(const auto& value) { // reaction to co_return
+        result = value; // - store value locally
+    }
+    ```
+
+    `return_void()` must not be provided. Note that it is undefined behavior if coroutines are implemented in a way that they sometimes may and sometimes may not return a value.
+
+9) So far, we have seen how coroutines are controlled from the outside using coroutine interfaces (wrapping coroutine handles and their promises). However, there is another configuration point that coroutines can (and have to) provide themselves: **awaitables**. Awaitables is the term for what the operator `co_await` needs as its operand. Thus, awaitables are all objects that `co_await` can deal with. **Awaiter** is the term for one specific (and typical) way to implement an awaitable. It has to provide three specific member functions to deal with the suspension and the resumption of a coroutine. `std::suspend_always` and `std::suspend_never` are two examples of awaiters. Awaiters must provide:
+    - `auto await_ready()`: This function is called for a coroutine immediately before the coroutine is suspended. It is provided to (temporarily) turn off suspension completely. If it returns `true`, the coroutine is not suspended at all. This function usually just returns `false` (“no, do not block/ignore any suspension”). To save the cost of suspension, it might conditionally yield `true` when a suspension makes no sense. Note that in this function, the coroutine is not suspended yet.
+    - `auto await_suspend(awaitHdl)`: This function is called for a coroutine immediately after the coroutine is suspended. The parameter `awaitHdl` is the handle of the coroutine that was suspended. It has the type `std::coroutine_handle<PromiseType>`. n this function, you can specify what to do next, including resuming the suspended or the awaiting coroutine immediately. You could even destroy the coroutine here.
+    - `auto await_resume()`: This function is called for a coroutine when the coroutine is resumed after a successful suspension.
+
+    An example:
+
+    ```c++
+    class Awaiter {
+    public:
+        bool await_ready() const noexcept {
+            std::cout << "
+            await_ready()\n";
+            return false;
+            // do suspend
+        }
+        void await_suspend(auto hdl) const noexcept {
+            std::cout << "await_suspend()\n";
+        }
+        void await_resume() const noexcept {
+            std::cout << "await_resume()\n";
+        }
+    };
+    ```
+
+    This is like `std::suspend_always`. A coroutine might use it as follows:
+
+    ```c++
+    CoroTask coro(int max)
+    {
+        std::cout << " CORO start\n";
+        for (int val = 1; val <= max; ++val) {
+            std::cout << " CORO " << val << '\n';
+            co_await Awaiter{}; // SUSPEND with our own awaiter
+        }
+        std::cout << " CORO end\n";
+    }
+    ```
+
+    Using like the following, you get this output:
+
+    ```c++
+    auto coTask = coro(2);
+    std::cout << "started\n";
+    std::cout << "loop\n";
+    while (coTask.resume()) { // RESUME
+        std::cout << " suspended\n";
+    }
+    std::cout << "done\n";
+    ```
+
+    ```
+    started
+    loop
+      CORO start
+      CORO 1
+       await_ready()
+       await_suspend()
+     suspended
+       await_resume()
+      CORO 2
+       await_ready()
+       await_suspend()
+     suspended
+       await_resume()
+      CORO end
+    done
+    ```
+
+10) By making a coroutine interface an awaitable, we can support sub-coruoutines.
+
+11) If `await_suspend()` returns a coroutine handle, that coroutine is resumed immediately.
+
+12) It is possibile to send values from the caller of a coroutine back to the coroutine itself. See page 498. The trick is to return an awaiter from `yield_value` and save the coroutine inside the `await_suspend` of the awaiter. When the caller resumes the coroutine, the `await_resume` of the awaiter gets called and, from the coroutine handle just saved,it can retreive the message in the promise stored by the caller, and return it.
+
+## Chapter 15: Coroutines in Detail
