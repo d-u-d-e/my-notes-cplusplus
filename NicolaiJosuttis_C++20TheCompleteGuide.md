@@ -1432,4 +1432,63 @@ template parameters.
         PROMISE: destructor
     ```
 
-4) 
+4) It is undefined behavior to resume a coroutine that is really suspended at the final suspend point. The only thing you can do with a coroutine suspended here is destroy it. Therefore, the real purpose of the `final_suspend()` function is to execute some logic, such as publishing a result, signaling completion, or resuming a continuation somewhere else. Because `final_suspend()` is outside the try block, it has to be `noexcept`. The recommendation is to structure your coroutines so that they do suspend here where possible. One reason is that it makes it much easier for the compiler to determine when the lifetime of the coroutine frame is nested inside the caller of the coroutine, which makes it more likely that the compiler can elide heap memory allocation of the coroutine frame. Therefore, unless you have a good reason not to do so, `final_suspend()` should always return `std::suspend_always{}`.
+
+5) After `unhandled_exception()` is called without ending the program, `final_suspend()` is called directly and the coroutine is suspended. The coroutine is also suspended if you throw or rethrow an exception in `unhandled_exception()`. Any exception thrown from `unhandled_exception()` is ignored.
+
+6) Having both `return_void()` and `return_value()` is not permitted. Note that you can overload `return_value()` for different types (except void) or make it generic.
+
+7) `yield_value(Type)` is called if the coroutine reaches a `co_yield` statement. You can overload `yield_value()` for different types or make it generic.
+
+8) Promises can also be used to define some optional operations that define special behavior of coroutines, where normally some default behavior is used. `await_transform()`, `operator new()` and `operator delete()` (specifying a different way memory is allocated for the coroutine state), `get_return_object_on_allocation_failure()`.
+
+9) The static member function `from_promise()` provides the way to initialize a coroutine handle with a coroutine. The function simply stores the address of the promise in the handle. `from_promise()` is usually called in `get_return_object()` for a promise created by the coroutine framework. Copying and assigning a coroutine handle is cheap. They just copy and assign the internal pointer. Therefore, coroutine handles are usually passed by value. This also means that multiple coroutine handles can refer to the same coroutine. As a programmer, you have to ensure that a handle never calls `resume()` or `destroy()` if another coroutine handle resumed or destroyed the coroutine. 
+
+10) The `address()` interface yields the internal pointer of the coroutine as `void*`. This allows programmers to export the coroutine handle to somewhere and later recreates a handle with the static function `from_address()`. However, note that you can use the address only as long as the coroutine exists.
+
+11) All coroutine handle types have an implicit type conversion to class `std::coroutine<void>`, in case you don't need the promise.
+
+12) When an exception is thrown inside a coroutine and this exception is not locally handled, `unhandled_exception()` is called in a catch clause behind the coroutine body. You have the following options for dealing with these exceptions:
+    - Ignoring the exception: the body of `unhandled_exception()` is empty.
+    - Processing the exception locally:
+
+        ```c++
+        void unhandled_exception() {
+            try {
+                throw;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "EXCEPTION: " << e.what() << std::endl;
+            }
+            catch (...) {
+                std::cerr << "UNKNOWN EXCEPTION" << std::endl;
+            }
+        }
+        ```
+    -  Ending or aborting the program (e.g., by calling `std::terminate()`)
+    -  Storing the exception for later use with `std::current_exception()` using an exception pointer:
+
+        ```c++
+        class [[nodiscard]] CoroTask {
+            ...
+            bool resume() const 
+            {
+                if (!hdl || hdl.done()) 
+                {
+                    return false;
+                }
+                hdl.promise().ePtr = nullptr;
+                // no exception yet
+                hdl.resume();
+                if (hdl.promise().ePtr) {
+                    // RETHROW any exception from the coroutine
+                    std::rethrow_exception(hdl.promise().ePtr);
+                }
+                return !hdl.done();
+            }
+        };
+        ```
+
+    Any exception thrown from `unhandled_exception()` is ignored.
+
+13)
