@@ -1181,8 +1181,8 @@ template parameters.
     `return_void()` must not be provided. Note that it is undefined behavior if coroutines are implemented in a way that they sometimes may and sometimes may not return a value.
 
 9) So far, we have seen how coroutines are controlled from the outside using coroutine interfaces (wrapping coroutine handles and their promises). However, there is another configuration point that coroutines can (and have to) provide themselves: **awaitables**. Awaitables is the term for what the operator `co_await` needs as its operand. Thus, awaitables are all objects that `co_await` can deal with. **Awaiter** is the term for one specific (and typical) way to implement an awaitable. It has to provide three specific member functions to deal with the suspension and the resumption of a coroutine. `std::suspend_always` and `std::suspend_never` are two examples of awaiters. Awaiters must provide:
-    - `auto await_ready()`: This function is called for a coroutine immediately before the coroutine is suspended. It is provided to (temporarily) turn off suspension completely. If it returns `true`, the coroutine is not suspended at all. This function usually just returns `false` (“no, do not block/ignore any suspension”). To save the cost of suspension, it might conditionally yield `true` when a suspension makes no sense. Note that in this function, the coroutine is not suspended yet.
-    - `auto await_suspend(awaitHdl)`: This function is called for a coroutine immediately after the coroutine is suspended. The parameter `awaitHdl` is the handle of the coroutine that was suspended. It has the type `std::coroutine_handle<PromiseType>`. n this function, you can specify what to do next, including resuming the suspended or the awaiting coroutine immediately. You could even destroy the coroutine here.
+    - `bool await_ready()`: This function is called for a coroutine immediately before the coroutine is suspended. It is provided to (temporarily) turn off suspension completely. If it returns `true`, the coroutine is not suspended at all. This function usually just returns `false` (“no, do not block/ignore any suspension”). To save the cost of suspension, it might conditionally yield `true` when a suspension makes no sense. Note that in this function, the coroutine is not suspended yet.
+    - `auto await_suspend(awaitHdl)`: This function is called for a coroutine immediately after the coroutine is suspended. The parameter `awaitHdl` is the handle of the coroutine that was suspended. It has the type `std::coroutine_handle<PromiseType>`. In this function, you can specify what to do next, including resuming the suspended or the awaiting coroutine immediately. You could even destroy the coroutine here.
     - `auto await_resume()`: This function is called for a coroutine when the coroutine is resumed after a successful suspension.
 
     An example:
@@ -1256,3 +1256,180 @@ template parameters.
 12) It is possibile to send values from the caller of a coroutine back to the coroutine itself. See page 498. The trick is to return an awaiter from `yield_value` and save the coroutine inside the `await_suspend` of the awaiter. When the caller resumes the coroutine, the `await_resume` of the awaiter gets called and, from the coroutine handle just saved,it can retreive the message in the promise stored by the caller, and return it.
 
 ## Chapter 15: Coroutines in Detail
+
+1) A coroutine may be a lambda. However, note that a coroutine lambda should never capture anything. This is because a lambda is a shortcut for defining a function object that is created in the scope in which the lambda is defined. When you leave that scope, the coroutine lambda might still be resumed even though the lambda object has been destroyed.
+
+2) When a coroutine is started, three things happen:
+    - A coroutine frame is created to store all necessary data of the coroutine. This usually happens on the heap.
+    - All parameters of the coroutine are copied into the frame. The advice is to never declare coroutine parameters as references. Otherwise, fatal runtime errors with undefined behavior may occur.
+    - The promise object is created inside the frame.
+
+    ![](images/coroutines.png)
+
+3) This is a great example of what happens when we create and run a coroutine:
+
+    ```c++
+    class [[nodiscard]] TracingCoro {
+    public:
+        struct promise_type;
+        using CoroHdl = std::coroutine_handle<promise_type>;
+        CoroHdl hdl;
+        struct promise_type {
+            promise_type() {
+                std::cout << "PROMISE: constructor\n";
+            }
+            ~promise_type() {
+                std::cout << "PROMISE: destructor\n";
+            }
+            auto get_return_object() {
+                std::cout << "PROMISE: get_return_object()\n";
+                return TracingCoro{CoroHdl::from_promise(*this)};
+            }
+            auto initial_suspend() {
+                std::cout << "PROMISE: initial_suspend()\n";
+                return std::suspend_always{}; // - start lazily
+            }
+            void unhandled_exception() {
+                // deal with exceptions
+                std::cout << "PROMISE: unhandled_exception()\n";
+                std::terminate();
+            }
+        };
+
+        TracingCoro(auto h)
+        : hdl{h} {
+            std::cout << "INTERFACE: construct\n";
+        }
+
+        ~TracingCoro() {
+            std::cout << "INTERFACE: destruct\n";
+            if (hdl) {
+                hdl.destroy();
+            }
+        }
+
+        TracingCoro(const TracingCoro&) = delete;
+        TracingCoro& operator=(const TracingCoro&) = delete;
+
+        bool resume() const {
+            std::cout << "INTERFACE: resume()\n";
+            if (!hdl || hdl.done()) {
+                return false;
+            }
+            hdl.resume();
+            return !hdl.done();
+        }
+    };
+
+    class TracingAwaiter {
+    inline static int maxId = 0;
+    int id;
+    public:
+        TracingAwaiter() : id{++maxId} {
+            std::cout << "AWAITER" << id << ": ==> constructor\n";
+        }
+        ~TracingAwaiter() {
+            std::cout << "AWAITER" << id << ": <== destructor\n";
+        }
+        TracingAwaiter(const TracingAwaiter&) = delete;
+        TracingAwaiter& operator=(const TracingAwaiter&) = delete;
+
+        bool await_ready() const noexcept {
+            std::cout << "AWAITER" << id << ":     await_ready()\n";
+            return false;
+        }
+
+        // Return type/value means:
+        // - void: do suspend
+        // - bool: true: do suspend
+        // - handle: resume coro of the handle
+        bool await_suspend(auto) const noexcept {
+            std::cout << "AWAITER" << id << ":     await_suspend()\n";
+            return false;
+        }
+
+        void await_resume() const noexcept {
+            std::cout << "AWAITER" << id << ":     await_resume()\n";
+        }
+    };
+
+    TracingCoro coro(int max)
+    {
+        std::cout << " START coro(" << max << ")\n";
+        for (int i = 1; i <= max; ++i) {
+            std::cout << " CORO: " << i << '/' << max << '\n';
+            co_await TracingAwaiter{};
+            std::cout << " CONTINUE coro(" << max << ")\n";
+        }
+        std::cout << " END coro(" << max << ")\n";
+    }
+
+    int main()
+    {
+        std::cout << "**** start coro()\n";
+        auto coroTask = coro(3);
+        std::cout << "**** coro() started\n";
+        std::cout << "\n**** resume coro() in loop\n";
+        while (coroTask.resume()) {
+            std::cout << "**** coro() suspended\n";
+            std::cout << "\n**** resume coro() in loop\n";
+        }
+        std::cout << "\n**** coro() loop done\n";
+    }
+    ```
+
+    The output is:
+    ```
+    **** start coro()
+        PROMISE: constructor
+        PROMISE: get_return_object()
+        INTERFACE: construct
+        PROMISE: initial_suspend()
+    **** coro() started
+
+    **** resume coro() in loop
+        INTERFACE: resume()
+        START coro(3)
+        CORO: 1/3
+        AWAITER1: ==> constructor
+        AWAITER1:     await_ready()
+        AWAITER1:     await_suspend()
+    **** coro() suspended
+
+    **** resume coro() in loop
+        INTERFACE: resume()
+        AWAITER1:     await_resume()
+        AWAITER1: <== destructor
+        CONTINUE coro(3)
+        CORO: 2/3
+        AWAITER2: ==> constructor
+        AWAITER2:     await_ready()
+        AWAITER2:     await_suspend()
+    **** coro() suspended
+
+    **** resume coro() in loop
+        INTERFACE: resume()
+        AWAITER2:     await_resume()
+        AWAITER2: <== destructor
+        CONTINUE coro(3)
+        CORO: 3/3
+        AWAITER3: ==> constructor
+        AWAITER3:     await_ready()
+        AWAITER3:     await_suspend()
+    **** coro() suspended
+
+    **** resume coro() in loop
+        INTERFACE: resume()
+        AWAITER3:     await_resume()
+        AWAITER3: <== destructor
+        CONTINUE coro(3)
+        END coro(3)
+        PROMISE: return_void()
+        PROMISE: final_suspend()
+    **** coro() loop done
+
+        INTERFACE: destruct
+        PROMISE: destructor
+    ```
+
+4) 
