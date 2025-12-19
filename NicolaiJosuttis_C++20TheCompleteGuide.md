@@ -1491,4 +1491,157 @@ template parameters.
 
     Any exception thrown from `unhandled_exception()` is ignored.
 
-13)
+13) `bool await_ready()` is called right before the coroutine is suspended. It can be used to (temporarily) turn off suspension completely. If it returns true, we are “ready” to immediately return from the request to suspend and continue with the coroutine without suspending it. Usually, this function just returns false, but however, it might conditionally yield true. With its return type, `await_suspend()` can also signal not to accept a suspension of the coroutine, but not accepting a suspension with `await_ready()` has the benefit that the program saves the costs of initiating the suspension of the coroutine at all. Note that inside this function, the coroutine it is called for is not suspended yet. Do not (indirectly) call `resume()` or `destroy()` here. You can even call more complex business logic here as long as you can ensure that logic does not call `resume()` or `destroy()` for the coroutine that is suspended here.
+
+14) `auto await_suspend(awaitHdl)` is called right after the coroutine is suspended. `awaitHdl` is the coroutine where the suspension is requested (with `co_await`). It has the type of the awaiting coroutine handle. Here, you could specify what to do next, including resuming the suspended coroutine or the awaiting coroutine immediately. You could even destroy the coroutine here. If the return type is void, you will suspend the coroutine and return back to the caller. If the return type is bool, then `false` means "do not suspend". If the return type is a coroutine handle, then that coroutine will be resumed. This is called **symmetric transfer**.
+
+15) `auto await_resume()` is called when the coroutine is resumed after a successful suspension. The return type of `await_resume()` is the type of the value that the `co_await` or `co_yield` expression that caused the suspension yields.
+
+16) This is an example of coroutines with a scheduler:
+
+    ```c++
+    #include <coroutine>
+    #include <exception>  // for terminate()
+    #include <map>
+
+    int CoroPrioDefVal = 10;
+    enum class CoroPrioRequest {same, less, more, def};
+
+    class CoroPrioScheduler;
+
+    class [[nodiscard]] CoroPrioTask {
+    public:
+    struct promise_type;
+    using CoroHdl = std::coroutine_handle<promise_type>;
+    private:
+    CoroHdl hdl;
+    friend class CoroPrioScheduler;
+    public:
+    struct promise_type {
+        CoroPrioScheduler* schedPtr = nullptr;  // each task knows its scheduler
+        auto get_return_object() { return CoroHdl::from_promise(*this); }
+        auto initial_suspend() { return std::suspend_always{}; }
+        void unhandled_exception() { std::terminate(); }
+        void return_void() { }
+        auto final_suspend() noexcept { return std::suspend_always{}; }
+    };
+
+    // constructor and destructor:
+    CoroPrioTask(CoroHdl h) : hdl{h} { }
+    ~CoroPrioTask() { if (hdl) hdl.destroy(); }
+
+    // move-only type:
+    CoroPrioTask(const CoroPrioTask&) = delete;
+    CoroPrioTask& operator=(const CoroPrioTask&) = delete;
+    CoroPrioTask(CoroPrioTask&& ct)
+    : hdl{ct.hdl} {
+        ct.hdl = nullptr;
+    }
+    CoroPrioTask& operator=(CoroPrioTask&& ct) {
+        if (this != &ct) {
+        hdl = ct.hdl;
+        ct.hdl = nullptr;
+        }
+        return *this;
+    }
+    };
+
+    class CoroPrioScheduler
+    {
+    std::multimap<int, CoroPrioTask> tasks;  // all tasks sorted by priority
+    public:
+    CoroPrioScheduler() = default;
+
+    void start(CoroPrioTask&& task) {
+        // store scheduler in coroutine state:
+        task.hdl.promise().schedPtr = this;
+        // schedule coroutine with a default priority:
+        tasks.emplace(CoroPrioDefVal, std::move(task));
+    }
+
+    bool resumeNext() {
+        // find next task with valid handle:
+        if (tasks.empty()) return false;
+        auto taskPos = tasks.begin();
+        auto hdl = taskPos->second.hdl;
+        while (!hdl || hdl.done()) {
+        ++taskPos;
+        if (taskPos == tasks.end()) {
+            return false; // nothing (more) to process
+        }
+        hdl = taskPos->second.hdl;
+        }
+        // resume that task:
+        hdl.resume(); // RESUME
+        if (hdl.done()) {
+        tasks.erase(taskPos);
+        }
+        return !tasks.empty();
+    }
+
+    bool changePrio(CoroPrioTask::CoroHdl hdl, CoroPrioRequest pr) {
+        for (auto pos = tasks.begin(); pos != tasks.end(); ++pos) {
+        if (hdl == pos->second.hdl) {
+            int newPrio = pos->first;
+            switch (pr) {
+            case CoroPrioRequest::same: break;
+            case CoroPrioRequest::less: ++newPrio; break;
+            case CoroPrioRequest::more: --newPrio; break;
+            case CoroPrioRequest::def: newPrio = CoroPrioDefVal; break;
+            }
+            // if prio changed, update key of scheduled task:
+            if (pos->first != newPrio) {
+            auto nh = tasks.extract(pos);
+            nh.key() = newPrio;
+            tasks.insert(std::move(nh));
+            }
+            return true;
+        }
+        }
+        return false; // hdl not found
+    }
+    };
+
+    class CoroPrio {
+    private:
+    CoroPrioRequest prioRequest;
+    public:
+    CoroPrio(CoroPrioRequest pr)
+    : prioRequest{pr} {
+    }
+
+    bool await_ready() const noexcept {
+        return false;// do suspend
+    }
+
+    void await_suspend(CoroPrioTask::CoroHdl h) noexcept {
+        h.promise().schedPtr->changePrio(h, prioRequest);
+    }
+
+    auto await_resume() const noexcept {}
+    };
+
+    int main()
+    {
+        std::cout << "start main()\n";
+        CoroPrioScheduler sched;
+        std::cout << "schedule coroutines\n";
+        sched.start(coro(5));
+        sched.start(coro(1));
+        sched.start(coro(4));
+        std::cout << "loop until all are processed\n";
+        while (sched.resumeNext()) {
+        }
+        std::cout << "end main()\n";
+    }
+    ```
+
+17) **Symmetric transfer** was introduced to improve performance and avoid stack overflows when coroutines call other coroutines. In general, when resuming a coroutine with `resume()`, the program needs a new stack frame for the new coroutine. If we were to resume a coroutine inside `await_suspend()` or after it was called, we would always pay that price. By returning the coroutine to be called, the stack frame for the current coroutine just replaces its coroutine so that no new stack frame is required.
+
+18) `std::noop_coroutine()` signals not to resume any other coroutine, meaning that the suspended coroutine returns to the caller. `std::noop_coroutine()` returns a `std::noop_coroutine_handle`, which is an alias type of `std::coroutine_handle<std::noop_coroutine_promise>`. Coroutines of that type have no effect when calling `resume()` or `destroy()`, return `nullptr` when calling `address()`, and always return false when calling `done()`.
+
+19) `co_await expr` is an operator that can be part of a bigger expression and take values that do not have an awaiter type. For example: `co_await 42;` `co_await` needs an awaitable and awaiters are only one (typical) implementation of them. In fact, `co_await` accepts any value of any type provided there is a mapping to the API of an awaiter. For the mapping, the C++ standard provides two approaches: `await_transform()` or `operator co_await()`. If a `co_await` expression occurs in a coroutine, the compiler first looks up whether there is a member function `await_transform()` that is provided by the promise of the coroutine. If that is the case, `await_transform()` is called and has to yield an awaiter, which is then used to suspend the coroutine. You can also use it to enable a coroutine to pass a value to the promise before using a (standard) awaiter. For example, in the previous example, instead of `co_await CoroPrio{CoroPrioRequest::less};` you could write `co_await CoroPrioRequest::less;` and add `auto await_transform(CoroPrioRequest);` to the promise. The other option for letting `co_await` deal with any value of (almost) any type is to implement `operator co_await()` for that type.
+
+20) `co_yield expr;` is equivalent to `co_await prm.yield_value(expr);`.
+
+21) With coroutine traits, there's no need for the coroutine to return the coroutine interface. See page 556.
