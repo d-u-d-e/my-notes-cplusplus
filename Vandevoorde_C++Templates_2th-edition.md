@@ -28,3 +28,10 @@
 
 3) Until C++17 you must always specify the template arguments
 explicitly. C++17 introduced CTAD, which allows skipping template arguments if they can be derived from the constructor.
+
+4) When passing arguments of a template type T by reference,
+the parameter doesn’t decay. So a C string would not decay to a pointer, but remain an array of fixed length.
+
+5) You can define specific deduction guides to provide additional or fix existing class template argument deductions.
+
+## Chapter 3: Nontype Template Parameters
