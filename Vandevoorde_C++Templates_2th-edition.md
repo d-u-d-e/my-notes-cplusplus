@@ -41,3 +41,65 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
 2) Since C++17 even static locally declared string literals can be passed as non type template args. Note that you cannot pass string literals.
 
 ## Chapter 4: Variadic Templates
+
+1) `sizeof...` expands to the number of elements a parameter pack contains.
+
+2) Since C++17, there is a feature to compute the result of using a binary operator over all the arguments of a parameter pack (with an optional initial value). If the parameter pack is empty, the expression is usually ill-formed (with the exception that for operator `&&` the value is `true`, for operator `||` the value is `false`, and for the comma operator the value for an empty parameter pack is `void()`). For example, you can use a fold expression to traverse a path in a binary tree using operator `->*`:
+    ```c++
+    struct Node {
+        int value;
+        Node* left;
+        Node* right;
+        Node(int i = 0) : value(i), left(nullptr), right(nullptr) {}
+    };
+
+    auto left = &Node::left;
+    auto right = &Node::right;
+
+    // traverse tree, using fold expression:
+    template<typename T, typename... TP>
+    Node* traverse (T np, TP... paths) {
+        return (np ->* ... ->* paths);
+    }
+
+    int main()
+    {
+        // init binary tree structure:
+        Node* root = new Node{0};
+        root->left = new Node{1};
+        root->left->right = new Node{2};
+        // traverse binary tree:
+        Node* node = traverse(root, left, right);
+    }
+    ```
+
+3) Note that the same rules apply to variadic function template parameters as for ordinary parameters. For example, if passed by value, arguments are copied and decay (e.g., arrays become pointers), while if passed by reference, parameters refer to the original parameter and don’t decay:
+    ```c++
+    // args are copies with decayed types:
+    template<typename... Args> void foo (Args... args);
+    // args are nondecayed references to passed objects:
+    template<typename... Args> void bar (Args const&... args);
+    ```
+
+4) You can also declare nontype template parameters to be parameter packs. For example:
+    ```c++
+    template<std::size_t... Idx, typename C>
+    void printIdx (C const& coll)
+    {
+        print(coll[Idx]...);
+    }
+
+    ...
+    std::vector<std::string> coll = {"good", "times", "say", "bye"};
+    printIdx<2, 0, 3>(coll);
+    ```
+
+5) Even deduction guides can be variadic. For example, the C++ standard library defines the following deduction guide for `std::array`s:
+    ```c++
+    namespace std {
+        template<typename T, typename... U> array(T, U...)
+        -> array<enable_if_t<(is_same_v<T, U> && ...), T>, (1 + sizeof...(U))>;
+    }
+    ```
+
+## Chapter 5: Tricky Basics
