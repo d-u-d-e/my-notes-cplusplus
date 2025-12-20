@@ -35,3 +35,9 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
 5) You can define specific deduction guides to provide additional or fix existing class template argument deductions.
 
 ## Chapter 3: Nontype Template Parameters
+
+1) With C++17 NTTP can be only constant integral values (including enumerations), pointers to objects/functions/members, lvalue references to objects or functions, or `std::nullptr_t`. This has been relaxed with C++20. Since C++17, you can define a nontype template parameter to generically accept any type that is allowed for a nontype parameter, by using `auto`.
+
+2) Since C++17 even static locally declared string literals can be passed as non type template args. Note that you cannot pass string literals.
+
+## Chapter 4: Variadic Templates
