@@ -103,3 +103,75 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
     ```
 
 ## Chapter 5: Tricky Basics
+
+1) `typename` has to be used whenever a name that depends on a template parameter is a type.
+
+2) For class templates with base classes that depend on template parameters, using a name `x` by itself is not always equivalent to `this->x`, even though a member `x` is inherited. For the moment, as a rule of,thumb, we recommend that you always qualify any symbol that is declared in a base that is somehow dependent on a template parameter with `this->` or `Base<T>::`.
+
+3) When passing raw arrays or string literals to templates, some care has to be taken. First, if the template parameters are declared as references, the arguments don’t decay. That is, a passed argument of `"hello"` has type `char const[6]`. Only when passing the argument by value, the types decay, so that string literals are converted to type `char const*`. Note that a **call parameter** declared as an array (with or without length) by language rules really has a pointer type.
+
+4) Sometimes, it is necessary to explicitly qualify template arguments when calling a member template. In that case, you have to use the template keyword to ensure that a `<` is the beginning of the template argument list:
+    ```c++
+    template<unsigned long N>
+    void printBitset (std::bitset<N> const& bs) {
+        std::cout << bs.template to_string<char, std::char_traits<char>, std::allocator<char>>();
+    }
+    ```
+    Without that extra use of `.template`, the compiler does not know that the less-than token (<) that follows is not really less-than but the beginning of a template argument list. Note that this is a problem only if the construct before the period depends on a template parameter. In our example, the parameter `bs` depends on the template parameter `N`. This is another good example:
+
+    ```c++
+    template< class T >
+    void f( T &x ) {
+        x->variable < T::constant < 3 >;
+    }
+    ```
+
+    Either `T::variable` or `T::constant` must be a template. The function means different things depending which is and which isn't: either `T::constant` gets compared to `3` and the Boolean result becomes a template argument to `T::variable<>` or `T::constant<3>` gets compared to `x->variable`. If it is the first case:
+
+    ```c++
+    template< class T >
+    void f( T &x ) {
+        x->template variable < T::constant < 3 >;
+    }
+    ```
+
+    If it is the latter:
+    ```c++
+    template< class T >
+    void f( T &x ) {
+        x->variable < T::template constant < 3 >;
+    }
+    ```
+
+    It would be kind of nice if the keyword were only required in actual ambiguous situations (which are kind of rare), but it makes the parser much easier to write.
+
+    The `.template` notation (and similar notations such as `->template` and `::template`) should be used only inside templates and only if they follow something that depends on a template parameter.
+
+5) Since C++14, variables also can be parameterized by a specific type. Such a thing is called a **variable template**. Since C++17, the standard library uses the technique of variable templates to define shortcuts for all type traits in the standard library that yield a (Boolean) value. For example, to be able to write:
+
+    ```c++
+    std::is_const_v<T>
+    ```
+    
+    the library defines:
+
+    ```c++
+    namespace std {
+        template<typename T> constexpr bool is_const_v = is_const<T>::value;
+    }
+    ```
+
+6) It can be useful to allow a template parameter itself to be a class template. This is called a **template template parameter**. Prior to C++17, default template arguments of template template arguments were not considered, so that a match couldn’t be achieved by leaving out arguments that have default values. For example you could not leave out the allocator parameter in this code:
+    ```c++
+    template<typename T, 
+        template<typename Elem, typename Alloc = std::allocator<Elem>> class Cont = std::deque>
+    class Stack {
+    private:
+        Cont<T> elems;
+        ...
+    };
+    ```
+
+    With C++17 you can avoid adding the `Alloc` template parameter since default arguments are considered (`deque` has a default argument for the allocator).
+
+## Chapter 6: Move Semantics and `enable_if<>`
