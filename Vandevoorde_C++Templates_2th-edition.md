@@ -175,3 +175,55 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
     With C++17 you can avoid adding the `Alloc` template parameter since default arguments are considered (`deque` has a default argument for the allocator).
 
 ## Chapter 6: Move Semantics and `enable_if<>`
+
+1) Don’t assume that `T&&` for a template parameter T behaves as `X&&` for a specific type `X`.
+
+2) `X&&` for a specific type `X` declares a parameter to be an rvalue reference. It can only be bound to a movable object (a prvalue, such as a temporary object, and an xvalue, such as an object passed with `std::move()`). It is always mutable and you can always “steal” its value (A type like `X const&&` is valid but provides no common semantics in practice because “stealing” the internal representation of a movable object requires modifying that object. It might be used, though, to force passing only temporaries or objects marked with `std::move()` without being able to modify them.)
+
+3) `T&&` for a template parameter `T` declares a **forwarding reference** (also called universal reference). It can be bound to a mutable, immutable (i.e., const), or movable object. Note that `T` must really be the name of a template parameter. Depending on a template parameter is not sufficient. For a template parameter `T`, a declaration such as typename `T::iterator&&` is just an rvalue reference, not a forwarding reference.
+
+4) Member function templates can also be used as special member functions, including as a constructor, which, however, might lead to surprising behavior: for example, for a nonconstant lvalue `Person p`:
+    ```c++
+    class Person
+    {
+    private:
+        std::string name;
+    public:
+        template<typename STR>
+        Person(STR&& n)
+    ...
+    }
+    ```
+    the templated constructor is a better match than the usal copy constructor:
+    ```c++
+    Person (Person const& p)
+    ```
+    because the latter involves a const conversion. You want to disable the member template for the case that the passed argument is a `Person` or an expression that can be converted to a `Person`.
+
+5) The common way to use `std::enable_if<>` is to use an additional function template argument with a default value:
+    ```c++
+    template<typename T,
+    typename = std::enable_if_t<(sizeof(T) > 4)>>
+    void foo() {}
+    ```
+
+6) We can solve the problem in 4 by writing:
+    ```c++
+    template<typename STR, typename = std::enable_if_t<
+    std::is_convertible_v<STR, std::string>>>
+    Person(STR&& n);
+    ```
+
+    With concepts, from C++20, we simply have to write the following:
+
+    ```c++
+    template<typename STR>
+    requires std::is_convertible_v<STR, std::string>
+    Person(STR&& n) : name(std::forward<STR>(n)) {
+    ...
+    }
+    ```
+
+7)  You can templify (and apply `enable_if<>`) to special member functions by deleting the predefined special member functions for `const volatile` (eg copy constructor).
+
+## Chapter 7: By Value or by Reference?
