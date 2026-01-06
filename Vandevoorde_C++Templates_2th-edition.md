@@ -227,3 +227,106 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
 7)  You can templify (and apply `enable_if<>`) to special member functions by deleting the predefined special member functions for `const volatile` (eg copy constructor).
 
 ## Chapter 7: By Value or by Reference?
+
+1) Since C++17 passing by value is usually expensive if we pass an lvalue (copy elision).
+
+2) When passing arguments to a parameter by value, the type decays. This means that raw arrays get converted to pointers and that qualifiers such as `const` and `volatile` are removed.
+
+3) Under the hood, passing an argument by reference is implemented by passing the address of the argument. Addresses are encoded compactly, and therefore transferring an address from the caller to the callee is efficient in itself. However, passing an address can create uncertainties for the compiler when it compiles the caller’s code: What is the callee doing with that address? In theory, the callee can change all the values that are “reachable” through that address. That means, that the compiler has to assume that all the values it may have cached (usually, in machine registers) are invalid after the call. Reloading all those values can be quite expensive. You may be thinking that we are passing by constant reference: Cannot the compiler deduce from that that no change can happen? Unfortunately, that is not the case because the caller may modify the referenced object through its own, non-const reference. This bad news is moderated by inlining. If the compiler can expand the call inline, it can reason about the caller and the callee together and in many cases “see” that the address is not used for anything but passing the underlying value.
+
+4) When passing arguments to parameters by reference, they do not decay.
+
+5) If you want to disable passing constant objects to nonconstant references, you can do the following:
+    ```c++
+    template<typename T>
+    void foo(T& arg) {
+        static_assert(!std::is_const<T>::value,
+        "out parameter of foo<T>(T&) is const");
+        ...
+    }
+    ```
+    or
+
+    ```c++
+    template<typename T,
+    typename = std::enable_if_t<!std::is_const<T>::value>
+    void foo(T& arg) {
+        ...
+    }
+    ```
+    or, even better since C++20:
+
+    ```c++
+    template<typename T>
+    requires !std::is_const_v<T>
+    void foo(T& arg) {
+        ...
+    }
+    ```
+
+6) One reason to use call-by-reference is to be able to perfect forward a parameter. Beware that forwarding references can cause problems like:
+    ```c++
+    template<typename T>
+    void passR(T&& arg) { // arg is a forwarding reference
+        T x;
+        // for passed lvalues, x is a reference, which requires an initializer
+        ...
+    }
+    ```
+
+7) Since C++11, you can let the caller decide, for a function template argument, whether to pass it by value or by reference. When a template is declared to take arguments by value, the caller can use `std::cref()` and `std::ref()`, declared in header file `<functional>`, to pass the argument by reference:
+
+    ```c++
+    template<typename T>
+    void printT (T arg) {
+        ...
+    }
+    
+    std::string s = "hello";
+    printT(std::cref(s)); // pass s “as if by reference”
+    ```
+
+    However, note that `std::cref()` does not change the handling of parameters in templates. Instead, it uses a trick: It wraps the passed argument `s` by an object that acts like a reference. In fact, it creates an object of type `std::reference_wrapper<>` referring to the original argument and passes this object by value. The wrapper more or less supports only one operation: an implicit type conversion back to the original type, yielding the original object. Note that the compiler has to know that an implicit conversion back to the original type is necessary. In fact this does not work:
+
+    ```c++
+    template<typename T>
+    void printV (T arg) {
+        std::cout << arg << ’\n’;
+    }
+    ...
+
+    std::string s = "hello";
+    printV(s); // OK
+    printV(std::cref(s)); // ERROR: no operator << for reference wrapper defined
+    ```
+
+8) When decaying arrays to pointers, you lose the ability to distinguish between handling pointers to elements from handling passed arrays. On the other hand, when dealing with parameters where string literals may be passed, not decaying can become a problem, because string literals of different size have different types.
+
+9) We should ensure that function templates return their result by value. However, as discussed in this chapter, using a template parameter `T` is no guarantee that it is not a reference, because `T` might sometimes implicitly be deduced as a reference:
+
+    ```c++
+    template<typename T>
+    T retR(T&& p) // p is a forwarding reference
+    {
+        return T{...}; // OOPS: returns by reference when called for lvalues
+    }
+    ```
+
+    Even when `T` is a template parameter deduced from a call-by-value call, it might become a reference type when explicitly specifying the template parameter to be a reference:
+
+    ```c++
+    template<typename T>
+    T retV(T p) // Note: T might become a reference
+    {
+        return T{...}; // OOPS: returns a reference if T is a reference
+    }
+
+    int x;
+    retV<int&>(x); // retV() instantiated for T as int&
+    ```
+
+    To be safe, you have two options: use the type trait `std::remove_reference<>`,  or let the compiler deduce the return type by just declaring the return type to be `auto`, because `auto` always decays.
+
+10)  By default, declare parameters to be passed by value. This is simple and usually works even with string literals. The performance is fine for small arguments and for temporary or movable objects. The caller can sometimes use `std::ref()` and `std::cref()` when passing existing large objects (lvalues) to avoid expensive copying. If you need an out or inout parameter, which returns a new object or allows to modify an argument to/for the caller, pass the argument as a nonconstant reference (unless you prefer to pass it via a pointer). However, you might consider disabling accidentally accepting const objects. If a template is provided to forward an argument, use perfect forwarding. That is, declare parameters to be forwarding references and use `std::forward<>()` where appropriate. Consider using `std::decay<>` or `std::common_type<>` to “harmonize” the different types of string literals and raw arrays. If performance is key and it is expected that copying arguments is expensive, use constant references. This, of course, does not apply if you need a local copy anyway.
+
+## Chapter 8: Compile-Time Programming
