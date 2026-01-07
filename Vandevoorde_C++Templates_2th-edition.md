@@ -367,3 +367,105 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
 1) The precompiled header scheme relies on the fact that code can be organized in such a manner that many files start with the same lines of code. Let’s assume for the sake of argument that every file to be compiled starts with the same N lines of code. We could compile these N lines and save the complete state of the compiler at that point in a precompiled header. Then, for every file in our program, we could reload the saved state and start compilation at line N+1. The key to making effective use of precompiled headers is to ensure that - as much as possible - files start with a maximum number of common lines of code. In practice this means the files must start with the same #include directives, which (as mentioned earlier) consume a substantial portion of our build time.
 
 ## Chapter 10: Basic Template Terminology
+
+1) For a variable, initialization or the absence of an `extern` specifier causes a declaration to become a definition.
+
+2) The declaration of a class template or function template is called a definition if it has a body.
+
+3) *Incomplete types* are one of the following:
+    - A class type that has been declared but not yet defined
+    - An array type with an unspecified bound
+    - An array type with an incomplete element type
+    - `void`
+    - An enumeration type as long as the underlying type or the enumeration values are not defined
+    - Any type above to which const and/or volatile are applied
+
+    All other types are *complete*.
+
+4) The C++ language definition places some constraints on the redeclaration of various entities. The totality of these constraints is known as the **one-definition rule** or ODR. For now, it suffices to remember the following ODR basics:
+    - Ordinary (i.e., not templates) noninline functions and member functions, as well as (noninline) global variables and static data members should be defined only once across the whole program.
+    - Class types (including structs and unions), templates (including partial specializations but not full specializations), and inline functions and variables should be defined at most once per translation unit, and all these definitions should be identical.
+
+5) The combination of the template name, followed by the arguments in angle brackets, is called a *template-id*.
+
+6) Because template parameters are compile-time entities, they can also be used to create valid template arguments. Here is an example:
+    ```c++
+    template<typename T>
+    class Dozen {
+    public:
+        ArrayInClass<T, 12> contents;
+    };
+    ```
+    
+    Note how in this example the name `T` is both a template parameter and a template argument.
+
+## Chapter 11: Generic Libraries
+
+1) The C++ standard library introduces the slightly broader notion of a callable type, which is either a function object type or a pointer to member. Generic code often benefits from being able to accept any kind of callable, and templates make it possible to do so.
+
+2) When we pass the name of a function as a function argument, we don’t really pass the function itself but a pointer or reference to it. As with arrays, function arguments decay to a pointer when passed by value. Just like arrays, functions can be passed by reference without decay, but references to functions are rarely used in mainstream C++ code.
+
+3) It is also possible for a class type object to be implicitly convertible to a pointer or reference to a surrogate call function: this is relatively unusual. Interestingly, lambdas that start with [] (no captures) produce a conversion operator to a function pointer. However, that is never selected as a surrogate call function because it is always a worse match than the normal `operator()` of the closure. A function pointer cannot carry state, so there is no way to represent a lambda that captures something as a function pointer without extra machinery. This was a design choice that improves usability and expressiveness.
+
+4) Member functions can be used as callables. Since C++17, the C++ standard library provides a utility `std::invoke()` that conveniently unifies this case with the ordinary function-call syntax cases, thereby enabling calls to any callable object with a single form:
+
+    ```c++
+    template<typename Iter, typename Callable, typename... Args>
+    void foreach (Iter current, Iter end, Callable op, Args const&... args)
+    {
+        while (current != end) {
+            std::invoke(op, args..., *current);
+            ++current;
+        }
+    }
+    ```
+    If the callable is a pointer to member, it uses the first additional argument as the `this` object. All remaining additional parameters are just passed as arguments to the callable. Otherwise, all additional parameters are just passed as arguments to the callable. Note that we can’t use perfect forwarding here for the callable or additional parameters: The first call might “steal” their values, leading to unexpected behavior calling op in subsequent iterations.
+
+    `std::invoke()` also allows a pointer to data member as a callback type. Instead of calling a function, it returns the value of the corresponding data member in the object referred to by the additional argument.
+
+5) A common application of `std::invoke()` is to wrap single function calls (to prepare some context for example):
+    ```c++
+    template<typename Callable, typename... Args>
+    decltype(auto) call(Callable&& op, Args&&... args)
+    {
+        return std::invoke(std::forward<Callable>(op), 
+        std::forward<Args>(args)...);
+    }
+    ```
+
+    The other interesting aspect is how to deal with the return value of a called function to “perfectly forward” it back to the caller. `decltype(auto)` (available since C++14) is a placeholder type that determines the type of variable, return type, or template argument from the type of the associated expression.
+
+    If you want to temporarily store the value returned by `std::invoke()` in a variable to return it after doing something else (e.g., to deal with the return value or log the end of the call), you also have to declare the temporary variable with `decltype(auto)`:
+
+    ```c++
+    decltype(auto) ret{std::invoke(std::forward<Callable>(op),
+    std::forward<Args>(args)...)};
+    ...
+    return ret;
+    ```
+    Note that declaring `ret` with `auto&&` is not correct. As a reference, `auto&&` extends the lifetime of the returned value until the end of its scope (see Section 11.3 on page 167) but not beyond the return statement to the caller of the function. **Plain `auto` never deduces to a reference, and `auto&&` always deduces to a reference**. 
+    However, there is also a problem with using `decltype(auto)`: If the callable has return type void, the initialization of `ret` as `decltype(auto)` is not allowed, because void is an incomplete type. You can make use of `if constexpr` to deal with void and non void cases.
+
+6) Type traits must be used with particular care: They might behave differently than the (naive) programmer might expect. For example:
+    ```c++
+    std::remove_const_t<int const&> // yields int const&
+    ```
+    Here, because a reference is not const (although you can’t modify it), the call has no effect and
+    yields the passed type. As a consequence, the order of removing references and const matters. Also there are cases where type traits have requirements. Not satisfying those requirements results in undefined behavior.
+
+7) Don’t forget to use the `std::decay<>` type trait to ensure the default return type can’t be a reference, because `std::declval()` itself yields rvalue references. `std::declval` can be used only in unevaluated contexts, like inside `decltype`or inside concepts. 
+
+8) Sometimes we have to perfectly forward data in generic code that does not come through a parameter. In that case, we can use `auto&&` to create a variable that can be forwarded:
+
+    ```c++
+    template<typename T>
+    void foo(T x)
+    {
+        auto&& val = get(x);
+        ...
+        // perfectly forward the return value of get() to set():
+        set(std::forward<decltype(val)>(val));
+    }
+    ```
+
+9) When implementing templates, sometimes the question comes up whether the code can deal with incomplete types. It's possible to defer instantiation of code members by adding additional template members if they require complete types. 
