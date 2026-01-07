@@ -361,3 +361,9 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
     This is of course superseded by concepts in C++20.
 
 2) With constexpr if, outside a template, a discarded statement is fully checked. In a template, it is not instantiated, which means that only the first translation phase (the definition time) is performed, which checks for correct syntax and names that don’t depend on template parameters.
+
+## Chapter 9: Using Templates in Practice
+
+1) The precompiled header scheme relies on the fact that code can be organized in such a manner that many files start with the same lines of code. Let’s assume for the sake of argument that every file to be compiled starts with the same N lines of code. We could compile these N lines and save the complete state of the compiler at that point in a precompiled header. Then, for every file in our program, we could reload the saved state and start compilation at line N+1. The key to making effective use of precompiled headers is to ensure that - as much as possible - files start with a maximum number of common lines of code. In practice this means the files must start with the same #include directives, which (as mentioned earlier) consume a substantial portion of our build time.
+
+## Chapter 10: Basic Template Terminology
