@@ -330,3 +330,34 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
 10)  By default, declare parameters to be passed by value. This is simple and usually works even with string literals. The performance is fine for small arguments and for temporary or movable objects. The caller can sometimes use `std::ref()` and `std::cref()` when passing existing large objects (lvalues) to avoid expensive copying. If you need an out or inout parameter, which returns a new object or allows to modify an argument to/for the caller, pass the argument as a nonconstant reference (unless you prefer to pass it via a pointer). However, you might consider disabling accidentally accepting const objects. If a template is provided to forward an argument, use perfect forwarding. That is, declare parameters to be forwarding references and use `std::forward<>()` where appropriate. Consider using `std::decay<>` or `std::common_type<>` to “harmonize” the different types of string literals and raw arrays. If performance is key and it is expected that copying arguments is expensive, use constant references. This, of course, does not apply if you need a local copy anyway.
 
 ## Chapter 8: Compile-Time Programming
+
+1) It’s not always easy to find out and formulate the right expression to SFINAE out function templates for certain conditions. Suppose, for example, that we want to ensure that the function template `len()` is ignored for arguments of a type that has a `size_type` member but not a `size()` member function. This results in an error because there is no requirement on size:
+
+    ```c++
+    template<typename T>
+    typename T::size_type len (T const& t)
+    {
+        return t.size();
+    }
+
+    std::allocator<int> x;
+    std::cout << len(x) << ’\n’;
+    // ERROR: len() selected, but x has no size()
+    ```
+    There is a common pattern or idiom to deal with such a situation:
+    - Specify the return type with the trailing return type syntax
+    - Define the return type using `decltype` and the comma operator
+    -  Formulate all expressions that must be valid at the beginning of the comma operator (converted to void in case the comma operator is overloaded)
+    - Define an object of the real return type at the end of the comma operator
+
+    ```c++
+    template<typename T>
+    auto len (T const& t) -> decltype((void)(t.size()), T::size_type())
+    {
+        return t.size();
+    }
+    ```
+
+    This is of course superseded by concepts in C++20.
+
+2) With constexpr if, outside a template, a discarded statement is fully checked. In a template, it is not instantiated, which means that only the first translation phase (the definition time) is performed, which checks for correct syntax and names that don’t depend on template parameters.
