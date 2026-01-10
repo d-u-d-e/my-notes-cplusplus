@@ -481,3 +481,59 @@ the parameter doesn’t decay. So a C string would not decay to a pointer, but r
 4) The C++ standard doesn’t mandate that differences in multiple definitions be detected or diagnosed across different translation units. However, the C++ standard qualifies this as leading to undefined behavior.
 
 5) The cross-translation unit constraints specify that when an entity is defined in two different places, the two places must consist of exactly the same sequence of tokens (the keywords, operators, identifiers, and so forth, remaining after preprocessing). Furthermore, these tokens must mean the same thing in their respective context (e.g., the identifiers may need to refer to the same variable). There is an exception for constants, provided the address is not taken.
+
+## Appendix B: Value categories
+
+1) For any expression `x`, `decltype((x))` (note the double parentheses) yields:
+    - `type` if `x` is a prvalue
+    - `type&` if `x` is an lvalue
+    - `type&&` if `x` is an xvalue
+
+2) A call to a function whose return type is an lvalue reference yields an lvalue.
+
+3) A call to a function whose return type is an rvalue reference to an object type yields an xvalue.
+
+4) A call to a function that returns a nonreference type yields a prvalue.
+
+## Appendix C: Overload Resolution
+
+1) Calls through function pointers and calls through pointers to member functions are not subject to overload resolution because the function to call is entirely determined (at run time) by the pointers.
+
+2) Overload resolution ranks the viable candidate functions by comparing how each argument of the call matches the corresponding parameter of the candidates. For one candidate to be considered better than another, the better candidate cannot have any of its parameters be a worse match than the corresponding parameter in the other candidate:
+
+    ```c++
+    void combine(int, double);
+    void combine(long, int);
+    
+    int main()
+    {
+        combine(1,2); // ambiguous!
+    }
+    ```
+3) Given 2, we are left with specifying how well a given argument matches the
+corresponding parameter of a viable candidate. As a first approximation, we can rank the possible matches as follows (from best to worst):
+    - Perfect match. The parameter has the type of the expression, or it has a type that is a reference to the type of the expression (possibly with added `const` and/or `volatile` qualifiers).
+    - Match with minor adjustments. This includes, for example, the decay of an array variable to a pointer to its first element or the addition of `const` to match an argument of type `int**` to a parameter of type `int const* const*`.
+    - Match with promotion. Promotion is a kind of implicit conversion that includes the conversion of small integral types (such as bool, char, short, and sometimes enumerations) to int, unsigned int, long, or unsigned long, and the conversion of float to double.
+    - Match with standard conversions only. This includes any sort of standard conversion (such as int to float) or conversion from a derived class to one of its public, unambiguous base classes but excludes the implicit call to a conversion operator or a converting constructor.
+    - Match with user-defined conversions. This allows any kind of implicit conversion.
+    - Match with ellipsis (...). An ellipsis parameter can match almost any type. However, there is one exception: Class types with a nontrivial copy constructor may or may not be valid.
+
+4) When all other aspects of overload resolution are equal, a nontemplate function is preferred over an instance of a template (it doesn’t matter whether that instance is generated from the generic template definition or whether it is provided as an explicit specialization):
+
+    ```c++
+    template<typename T> int f(T); // #1
+    void f(int); // #2
+    int main()
+    {
+        return f(7); // ERROR: selects #2 , which doesn’t return a value
+    }
+    ```
+
+5) When two templates only differ in that one adds a trailing parameter packs: The template without the pack is considered more specialized and is therefore preferred if it matches the call.
+
+6) An implicit conversion can, in general, be a sequence of elementary conversions. There can be at most one user-defined conversion in a conversion sequence. An important principle of overload resolution is that a conversion sequence that is a subsequence of another conversion sequence is preferable over the latter sequence. 
+
+7) Within the category of regular pointer conversions, conversions to type bool (both from a regular pointer and from a pointer to a member) are considered worse than any other kind of standard conversion. A conversion to type `void*` is considered worse than a conversion from a derived class pointer to a base class pointer. Furthermore, if conversions to different classes related by inheritance exist, a conversion to the most derived class is preferred.
+
+8) Initializer list arguments (initializers passed with in curly braces) can be converted to several different kinds of parameters: `initializer_list`s, class types with an `initializer_list` constructor, class types for which the initializer list elements can be treated as (separate) parameters to a constructor, or aggregate class types whose members can be initialized by the elements of the initializer list.
