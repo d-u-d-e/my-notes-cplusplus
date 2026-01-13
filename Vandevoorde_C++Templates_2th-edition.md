@@ -763,4 +763,54 @@ corresponding parameter of a viable candidate. As a first approximation, we can 
 
     This example may give the impression that ADL is disabled for template-ids, but it is not. The code can be fixed by introducing a function template named select that is visible at the call: `template<typename T> void select();`.
 
-9) Nondependent bases in templates behave very much like bases in ordinary nontemplate classes, but there is a slightly unfortunate surprise: When an unqualified name is looked up in the templated derivation, the nondependent bases are considered before the list of template parameters.
+9) In a class template, a nondependent base class is one with a complete type that can be determined without knowing the template arguments. In other words, the name of this base is denoted using a nondependent name:
+    ```c++
+    template<typename X>
+    class Base {
+    public:
+        int basefield;
+        using T = int;
+    };
+
+    // not a template case really
+    class D1: public Base<Base<void>> {
+    public:
+        void f() { basefield = 3; }
+    };
+
+    template<typename T>
+    class D2 : public Base<double> {
+    // nondependent base
+    public:
+        void f() { 
+            // usual access to inherited member
+            basefield = 7; 
+        }
+        T strange; // T is Base<double>::T, not the template parameter!
+    };
+    ```
+    Nondependent bases in templates behave very much like bases in ordinary nontemplate classes, but there is a slightly unfortunate surprise: when an unqualified name is looked up in the templated derivation, the nondependent bases are considered before the list of template parameters; for example, this is not valid C++:
+
+    ```c++
+    void g (D2<int*>& d2, int* p)
+    {
+        d2.strange = p;
+        // ERROR: type mismatch!
+    }
+    ```
+
+10) The C++ standard specifies that a nondependent name appearing in a template is looked up as soon as it is encountered. But  nondependent names are not looked up in dependent base classes. So something like this is an error:
+
+    ```c++
+    template<typename T>
+    class DD : public Base<T> {
+    // dependent base
+    public:
+        void f() { basefield = 0; } // problem...
+    };
+    ```
+    To correct the code, it suffices to make the name `basefield` dependent because dependent names can be looked up only at the time of instantiation, and at that time the concrete base instance that must be explored will be known. To delay the lookup use `this->basefield`. An alternative consists in introducing a dependency using a qualified name: ` Base<T>::basefield`. The latter alternative can inhibit the virtual call mechanism so care must be taken. If you find that the repeated qualifications are cluttering up your code, you can bring a name from a dependent base class in the derived class once and for all with: `using Base<T>::basefield;`.
+
+11) The lookup rule that causes a name in nondependent bases to hide an identically named template parameter is an oversight, but suggestions to change the rule have not garnered support from the C++ standardization committee. It is best to avoid code with template parameter names that are also used in nondependent base classes.
+
+## Chapter 14: Instantiation
