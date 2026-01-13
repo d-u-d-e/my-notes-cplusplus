@@ -814,3 +814,126 @@ corresponding parameter of a viable candidate. As a first approximation, we can 
 11) The lookup rule that causes a name in nondependent bases to hide an identically named template parameter is an oversight, but suggestions to change the rule have not garnered support from the C++ standardization committee. It is best to avoid code with template parameter names that are also used in nondependent base classes.
 
 ## Chapter 14: Instantiation
+
+1) **Two-phase lookup**: the first phase is the parsing of a template, and the second phase is
+its instantiation.
+
+2) During the first phase, while parsing a template, nondependent names are looked up using both the ordinary lookup rules and, if applicable, the rules for argument-dependent lookup (ADL). During the second phase, while instantiating a template at a point called the point of instantiation (POI), dependent qualified names are looked up (with the template parameters replaced with the template arguments for that specific instantiation), and an additional ADL is performed for the unqualified dependent names that were looked up using ordinary lookup in the first phase. For unqualified dependent names, the initial ordinary lookup—while not complete—is used to decide whether the name is a template. So this does not compile
+
+    ```c++
+    template <typename T>
+    void f1(T x)
+    {
+        g1(x);
+    }
+
+    void g1(int)
+    {
+
+    }
+
+    int main()
+    {
+        f1(7);
+    }
+    // POI for f1<int>(int)
+    ```
+
+    This is because `f1(7)` creates a POI for `f1<int>(int)`, where lookup of `g1` fails. When `f1` is first parsed, `g1` is unqualified and dependant, so ordinary lookup is performed. No `g1` is visible at that point. At the POI, ADL is performed on `g1` but no `g1` is found in associated namespaces and classes.
+
+    **A POI is a point in the source where the substituted template could be inserted.**
+
+3) The **POI for a reference to a generated class instance** is defined to be
+the point immediately *before* the nearest namespace scope declaration or definition that contains the reference to that instance. **The POI for a reference to a function template specialization** is immediately after the nearest namespace scope declaration or definition that contains that reference. **The POI for variable templates** is handled similarly to that of function templates.
+
+4) It is possible to create explicitly a point of instantiation for a template specialization. The construct that achieves this is called an **explicit instantiation directive**:
+    ```c++
+    template<typename T>
+    void f(T)
+    {}
+
+    // four valid explicit instantiations:
+    template void f<int>(int);
+    template void f<>(float);
+    template void f(long);
+    template void f(char);
+    ```
+
+    It consists of the keyword `template` followed by a declaration of the specialization to be instantiated. Members of class templates can also be explicitly instantiated in this way; furthermore, all the members of a class template specialization can be explicitly instantiated by explicitly instantiating the class template specialization. A template specialization that is explicitly instantiated should not be explicitly specialized, and vice versa, because that would imply that the two definitions could be different (thus violating the ODR).
+
+5) Many C++ programmers have observed that automatic template instantiation has a nontrivial negative impact on build times, because the same template specializations may be instantiated and optimized in many different translation units. A technique to improve build times consists in manually instantiating those template specializations that the program requires in a single location and inhibiting the instantiation in all other translation units. One portable way to ensure this inhibition is to not provide the template definition except
+in the translation unit where it is explicitly instantiated:
+
+    ```c++
+    //translation unit 1:
+    template<typename T> void f(); // no definition: prevents instantiation
+    // in this translation unit
+
+    void g()
+    {
+        f<int>();
+    }
+
+    //translation unit 2:
+    template<typename T> void f()
+    {
+    // implementation
+    }
+
+    template void f<int>();
+    // manual instantiation
+
+    void g();
+    int main()
+    {
+        g();
+    }
+    ```
+    In the first translation unit, the compiler cannot see the definition of the function template `f`, so it will not (cannot) produce an instantiation of `f<int>`. The second translation unit provides the definition of `f<int>` via an explicit instantiation definition; without it, the program would fail to link.
+
+    This is called **manual instantiation** and has its drawbacks.
+
+6) An **explicit instantiation declaration** is an explicit instantiation directive prefixed by the keyword `extern`. Explicit instantiation declarations can be used to improve compile or link times when certain specializations are used in many different translation units. It suppresses automatic instantiation of the named template specialization, because it declares that the named template specialization will be defined somewhere in the program.
+
+7) With constexpr if, during the instantiation of templates (including generic lambdas), the
+discarded branch is not instantiated. So this compiles:
+    ```c++
+    template<typename T> bool f(T p) {
+        if constexpr (sizeof(T) <= sizeof(long long)) {
+            return p>0;
+        } else {
+            return p.compare(0) > 0;
+        }
+    }
+
+    bool g(int n) {
+        return f(n); // OK
+    }
+    ```
+
+    If it weren’t discarded, it would be instantiated and we’d run into an error for the expression `p.compare(0)` (not valid for integer `p`). Prior to C++17 and its `constexpr if` statements, avoiding such errors required explicit template specialization or overloading:
+    ```c++
+    template<bool b> struct Dispatch {
+        template<typename T>
+        static bool f(T p) {
+            return p.compare(0) > 0;
+        }
+    };
+
+    template<> struct Dispatch<true> {
+        template<typename T>
+        static bool f(T p) {
+            return p > 0;
+        }
+    };
+
+    template<typename T> bool f(T p) {
+        return Dispatch<sizeof(T) <= sizeof(long long)>::f(p);
+    }
+    
+    bool g(int n) {
+        return f(n); // OK
+    }
+    ```
+
+## Chapter 15: Template Argument Deduction
