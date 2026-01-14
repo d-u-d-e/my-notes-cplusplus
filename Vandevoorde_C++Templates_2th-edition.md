@@ -1117,3 +1117,126 @@ class type of the A type or a pointer to a base class type of the class type for
         // run-time ERROR: returns reference to temporary
     }
     ```
+
+20) There are a few special situations for the otherwise simple deduction rules of `auto`. The first is when the initializer for a variable is an initializer list. The corresponding deduction for a function call would fail, because we cannot deduce a template type parameter from an initializer list argument:
+
+    ```c++
+    template<typename T>
+    void deduceT(T);
+    ...
+    deduceT({ 2, 3, 4}); // ERROR
+    deduceT({ 1 }); // ERROR
+    ```
+
+    However, if our function has a more specific parameter as follows:
+    ```c++
+    template<typename T>
+    void deduceInitList(std::initializer_list<T>);
+    ...
+    deduceInitList({ 2, 3, 5, 7 }); // OK: T deduced as int
+    ```
+    then deduction succeeds. 
+    
+21) Copy-initializing (i.e., initialization with the = token) an `auto` variable
+with an initializer list is therefore defined in terms of that more specific parameter:
+    ```c++
+    auto primes = { 2, 3, 5, 7 }; // primes is std::initializer_list<int>
+    deduceT(primes); // T deduced as std::initializer_list<int>
+    ```
+
+    Before C++17, the corresponding direct-initialization of `auto` variables (i.e., without the = token) was also handled that way, but this was changed in C++17. Thus prior to C++17 `auto val { 2 }` makes `val` an initializer list. Now it's simply an `int` with value `2`.
+
+22) Returning a braced initializer list for a function with a deducible placeholder type is invalid. That is because an initializer list in function scope is an object that points into an underlying array object (with the element values specified in the list) that expires when the function returns. Allowing the construct would thus encourage what is in effect a dangling reference.
+
+23) Any use of a function template with a deduced return type requires the immediate instantiation of that template to determine the return type with certainty. That, however, has a surprising consequence when it comes to SFINAE:
+
+    ```c++
+    template<typename T, typename U>
+    auto addA(T t, U u) -> decltype(t+u)
+    {
+        return t + u;
+    }
+    void addA(...);
+
+    template<typename T, typename U>
+    auto addB(T t, U u) -> decltype(auto)
+    {
+        return t + u;
+    }
+    void addB(...);
+
+    struct X {};
+    using AddResultA = decltype(addA(X(), X())); // OK: AddResultA is void
+    using AddResultB = decltype(addB(X(), X())); // ERROR: instantiation of addB<X>
+    //is ill-formed
+    ```
+
+    The function body of the addB() template must be fully instantiated to determine its return type. That instantiation isn’t in the immediate context of the call to `addB()` and therefore doesn’t fall under the SFINAE filter but results in an outright error.
+
+    **It is therefore important to remember that deduced return types are not merely a shorthand for a complex explicit return type and they should be used with care (i.e., with the understanding that they shouldn’t be called in the signatures of other function templates that would count on SFINAE properties).**
+
+24) Three different kinds of entities can initialize a *structured binding*:
+    -  The first case is the simple *class* type, where all the nonstatic data members are public. In that case, the number of bracketed identifiers must equal the number of members.
+    - The second case corresponds to arrays. With `auto []` the array is copied from the initializer, element by element. `auto& []` does not involve copying, but the identifiers become aliases for the array elements.
+    - Finally, a third option allows `std::tuple`-like classes to have their elements decomposed through a template-based protocol using `get<>()`.
+
+25) An `auto` in a parameter of a lambda is handled similarly to an `auto` in the type of a variable with an initializer: It is replaced by an invented template type parameter `T`. The member function template is instantiated when the closure is invoked, which is usually not at the point where the lambda expression appears.
+
+26) For the purposes of template argument deduction, template aliases are transparent: they can be used to clarify and simplify code but have no effect on how deduction operates.
+
+27) C++17 introduces **CTAD: class template argument deduction**. All parameters must be determined by the deduction process or from default arguments. Deduction guides are needed, except for cases where they are implicit, like constructors. 
+
+28) CTAD introduced  subtleties like:
+    ```c++
+    template<typename T> struct X {
+        template<typename Iter> X(Iter b, Iter e);
+        template<typename Iter> auto f(Iter b, Iter e) {
+            return X(b, e); // What is this?
+        }
+    };
+    ```
+    This code is valid C++14: The `X` in `X(b, e)` is the injected class name and is equivalent to `X<T>` in this context. The rules for class template argument deduction, however, would naturally make that `X` equivalent to `X<Iter>`. In order to maintain backward compatibility, however, class template argument deduction is disabled if the name of the template is an injected class name.
+
+    Consider:
+
+    ```c++
+    template<typename T> struct Y {
+        Y(T const&);
+        Y(T&&);
+    };
+
+    void g(std::string s) {
+        Y y = s;
+    }
+    ```
+
+    Clearly, the intent here is that we deduce `T` to be `std::string` through the implicit deduction guide associated with the copy constructor. Writing the implicit deduction guides as explicitly declared guides reveals a surprise, however:
+
+    ```c++
+    template<typename T> Y(T const&) -> Y<T>; // #1
+    template<typename T> Y(T&&) -> Y<T>; // #2
+    ```
+
+    Implicit guide #1 deduces `T` to be `std::string` but requires the argument
+    to be adjusted from `std::string` to `std::string const`. Guide #2 , however, deduces `T` to be a reference type `std::string&`, which is a better match because no `const` must be added for type adjustment purposes. This outcome would be rather surprising and likely would result in instantiation errors when the class template parameter is used in contexts that do not permit reference types or even worse dangling references. The C++ standardization committee therefore decided to disable the special deduction rule for `T&&` when performing deduction for implicit deduction guides if the `T` was originally a class template parameter (as opposed to a constructor template parameter; for those, the special deduction rule remains).
+
+29) A deduction guide can be declared with the keyword `explicit`. It is then considered only for direct-initialization cases, not for copy-initialization cases.
+
+30) Deduction guides are not function templates: they are only used to deduce template parameters and are not “called.” That means that the difference between passing arguments by reference or by value is not important for guiding declarations:
+
+    ```c++
+    template<typename T> struct X {
+    ...
+    };
+
+    template<typename T> struct Y {
+        Y(X<T> const&);
+        Y(X<T>&&);
+    };
+
+    template<typename T> Y(X<T>) -> Y<T>;
+    ```
+
+    Note how the deduction guide does not quite correspond to the two constructors of `Y`. However, that does not matter, because the guide is only used for deduction. Given a value `xtt` of type `X<TT>` lvalue or rvalue, it will select the deduced type `Y<TT>`. Then, initialization will perform overload resolution on the constructors of `Y<TT>` to decide which one to call (which will depend on whether `xtt` is an lvalue or an rvalue).
+
+## Chapter 16: Specialization and Overloading
