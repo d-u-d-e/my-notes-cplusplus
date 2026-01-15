@@ -1240,3 +1240,107 @@ with an initializer list is therefore defined in terms of that more specific par
     Note how the deduction guide does not quite correspond to the two constructors of `Y`. However, that does not matter, because the guide is only used for deduction. Given a value `xtt` of type `X<TT>` lvalue or rvalue, it will select the deduced type `Y<TT>`. Then, initialization will perform overload resolution on the constructors of `Y<TT>` to decide which one to call (which will depend on whether `xtt` is an lvalue or an rvalue).
 
 ## Chapter 16: Specialization and Overloading
+
+1) Two functions can coexist in a program if they have distinct signatures. We define the **signature** of a function as the following information:
+    - The unqualified name of the function (or the name of the function template from which it was generated)
+    - The class or namespace scope of that name and, if the name has internal linkage, the translation unit in which the name is declared
+    -  The `const`, `volatile`, or `const volatile` qualification of the function (if it is a member func- tion with such a qualifier)
+    -  The `&` or `&&` qualification of the function (if it is a member function with such a qualifier)
+    - The types of the function parameters (before template parameters are substituted if the function is generated from a function template)
+    - Its return type, if the function is generated from a function template
+    - The template parameters and the template arguments, if the function is generated from a function template
+
+    This means that the following templates and their instantiations could, in principle, coexist in the same program:
+
+    ```c++
+    template<typename T1, typename T2>
+    void f1(T1, T2);
+    template<typename T1, typename T2>
+    void f1(T2, T1);
+    template<typename T>
+    long f2(T);
+    template<typename T>
+    char f2(T);
+    ```
+
+    However, they cannot always be used when they’re declared in the same scope because instantiating both creates an overload ambiguity. For example, calling `f2(42)` when both the templates above are declared will clearly create an ambiguity.
+
+    Similarly:
+
+    ```c++
+
+    template<typename T1, typename T2>
+    void f1(T1, T2)
+    {
+        std::cout << "f1(T1, T2)\n";
+    }
+
+    template<typename T1, typename T2>
+    void f1(T2, T1)
+    {
+        std::cout << "f1(T2, T1)\n";
+    }
+
+    // fine so far
+    int main()
+    {
+        f1<char, char>(’a’, ’b’); // ERROR: ambiguous
+    }
+    ```
+
+2) In what follows, we describe the exact procedure to determine whether one function template participating in an overload set is more specialized than the other. Note that these are partial ordering rules: It is possible that given two templates, neither can be considered more specialized than the other. If overload resolution must select between two such templates, no decision can be made, and the program contains an ambiguity error. 
+    -  Function call parameters that are covered by a default argument and ellipsis parameters that are not used are ignored in what follows.
+    - We synthesize two artificial lists of argument types by substituting every template parameter as follows: 1. Replace each template type parameter with a unique invented type. 2. Replace each template template parameter with a unique invented class template. 3. Replace each nontype template parameter with a unique invented value of the appropriate type.
+    - If template argument deduction of the second template against the first synthesized list of argument types succeeds with an exact match, but not vice versa, then the first template is more specialized than the second. Conversely, if template argument deduction of the first template against the second synthesized list of argument types succeeds with an exact match, but not vice versa, then the second template is more specialized than the first. Otherwise (either no deduction succeeds or both succeed), there is no ordering between the two templates.
+
+    Consider:
+
+    ```c++
+    template<typename T>
+    void t(T*, T const* = nullptr, ...);
+
+    template<typename T>
+    void t(T const*, T*, T* = nullptr);
+
+    void example(int* p)
+    {
+        t(p, p);
+    }
+    ```
+
+    First, because the actual call does not use the ellipsis parameter for the first template and the last parameter of the second template is covered by its default argument, these parameters are ignored in the partial ordering.
+
+    The synthesized lists of argument types are `(A1*, A1 const*)` and `(A2 const*, A2*)`.  Template argument deduction of `(A1*, A1 const*)` versus the second template actually succeeds with the substitution of `T` with `A1 const`, but the resulting match is not exact because a qualification adjustment is needed to call `t<A1 const>(A1 const*, A1 const*, A1 const* = 0)` with arguments of types `(A1*, A1 const*)`.  Similarly for the first template from the argument type list `(A2 const*, A2*)`. Therefore, there is no ordering relationship between the two templates, and the call is ambiguous.
+
+3) Function templates can be overloaded with nontemplate functions. All else being equal, the non template function is preferred in selecting the actual function being called. But take care when `const` qualifier appears:
+
+    ```c++
+    class C {
+    public:
+        C() = default;
+        C (C const&) {
+            std::cout << "copy constructor\n";
+        }
+        C (C&&) {
+            std::cout << "move constructor\n";
+        }
+        template<typename T>
+        C (T&&) {
+            std::cout << "template constructor\n";
+        }
+    };
+
+    int main()
+    {
+        C x;
+        C x2{x}; // prints: template constructor
+        C x3{std::move(x)}; // prints: move constructor
+        C const c;
+        C x4{c}; // prints: copy constructor
+        C x5{std::move(c)}; // prints: template constructor
+    }
+    ```
+
+    **For this reason, usually you have to partially disable such member function templates when they might hide copy or move constructors.**
+
+4) There's a special rule that considers nonvariadic templates (those with a fixed number of parameters) to be more specialized than variadic templates (with a variable number of parameters). Point 2) is extended so that any argument derived from a variadic parameter cannot match a parameter that is not a parameter pack.
