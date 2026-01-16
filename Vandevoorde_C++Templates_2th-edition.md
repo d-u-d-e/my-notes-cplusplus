@@ -1344,3 +1344,65 @@ with an initializer list is therefore defined in terms of that more specific par
     **For this reason, usually you have to partially disable such member function templates when they might hide copy or move constructors.**
 
 4) There's a special rule that considers nonvariadic templates (those with a fixed number of parameters) to be more specialized than variadic templates (with a variable number of parameters). Point 2) is extended so that any argument derived from a variadic parameter cannot match a parameter that is not a parameter pack.
+
+5) The ability to overload function templates, combined with the partial ordering rules to select the “best” matching function template, allows us to add more specialized templates to a generic implementation to tune code transparently for greater efficiency. However, class templates and variable templates cannot be overloaded. Instead, another mechanism was chosen to enable transparent customization of class templates: **explicit specialization**. The standard term explicit specialization refers to a language feature that we call **full specialization** instead. **Partial specialization** is similar to full specialization, but instead of fully substituting the template parameters, some parameterization is left in the alternative implementation of a template.
+
+6) A full class specialization is introduced with a sequence of three tokens: `template`, `<`, and `>`.
+
+7) Because it is not a template declaration, the members of a full class template specialization can be defined using the ordinary out-of-class member definition syntax (in other words, the `template<>` prefix cannot be specified).
+
+8) A full specialization is a replacement for the instantiation of a certain generic template, and it is not valid to have both the explicit and the generated versions of a template present in the same program:
+
+    ```c++
+    template<typename T>
+    class Invalid {
+    };
+
+    Invalid<double> x1;
+    // causes the instantiation of Invalid<double>
+    template<>
+    class Invalid<double>; // ERROR: Invalid<double> already instantiated
+    ```
+
+9) Care must be taken to ensure
+that the declaration of the specialization is visible to all the users of the generic template. In practical terms, this means that a declaration of the specialization should normally follow the declaration of the template in its header file.
+
+10) A full specialization is in many ways similar to a normal declaration (or rather, a normal redeclaration). In particular, it does not declare a template, and therefore only one definition of a noninline full function template specialization should appear in a program.
+
+11) Variable templates can also be fully specialized. By now, the syntax should be intuitive:
+    ```c++
+    template<typename T> constexpr std::size_t SZ = sizeof(T);
+    template<> constexpr std::size_t SZ<void> = 0;
+    ```
+    Interestingly, a variable template specialization is not required to have a type matching that of the template being specialized.
+
+12) If, while attempting
+to match a partial specialization an invalid construct is formed, that specialization is silently abandoned and another candidate is examined if one is available. If no matching specializations is found, the primary template is selected. If multiple matching specializations are found, the most specialized one (in the sense defined for overloaded function templates) is selected; if none can be called most specialized, the program contains an ambiguity error.
+
+13) Class templates can be partially specialized, whereas function templates are simply overloaded.
+
+14) Template argument deduction for pack expansions only works when the pack expansion occurs at the end of the parameter or argument list.
+
+## Chapter 18: The Polymorphic Power of Templates
+
+1) Templates can also be used to implement polymorphism. However, they don’t rely on the factoring of common behavior in base classes.
+
+2) Polymorphism implemented via inheritance is bounded and dynamic:
+    -  **Bounded** means that the interfaces of the types participating in the polymorphic behavior are predetermined by the design of the common base class (other terms for this concept are invasive and intrusive).
+    -  **Dynamic** means that the binding of the interfaces is done at run time (dynamically).
+
+    Polymorphism implemented via templates is unbounded and static:
+    - **Unbounded** means that the interfaces of the types participating in the polymorphic behavior are not predetermined (other terms for this concept are noninvasive and nonintrusive).
+    - **Static** means that the binding of the interfaces is done at compile time (statically).
+
+3) Dynamic polymorphism in C++ exhibits the following strengths:
+    - Heterogeneous collections are handled elegantly.
+    - The executable code size is potentially smaller (because only one polymorphic function is needed, whereas distinct template instances must be generated to handle different types).
+    - Code can be entirely compiled; hence no implementation source must be published (distributing template libraries usually requires distribution of the source code of the template implementations).
+
+4) In contrast, the following can be said about static polymorphism in C++:
+    - Collections of built-in types are easily implemented. More generally, the interface commonality need not be expressed through a common base class.
+    - Generated code is potentially faster (because no indirection through pointers is needed a priori and nonvirtual functions can be inlined much more often).
+    - Concrete types that provide only partial interfaces can still be used if only that part ends up being exercised by the application.
+
+## Chapter 19: Implementing Traits
