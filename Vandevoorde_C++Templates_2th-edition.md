@@ -1406,3 +1406,573 @@ to match a partial specialization an invalid construct is formed, that specializ
     - Concrete types that provide only partial interfaces can still be used if only that part ends up being exercised by the application.
 
 ## Chapter 19: Implementing Traits
+
+1) Consider:
+
+    ```c++
+    template<typename T>
+    T accum (T const* beg, T const* end)
+    {
+        T total{}; // assume this actually creates a zero value
+        while (beg != end) {
+            total += *beg;
+            ++beg;
+        }
+        return total;
+    }
+    ```
+
+    The only slightly subtle decision here is how to create a zero value of the correct type to start our summation. Instantiating the template for the type `char`, turns out to be too small a range for the accumulation of even relatively small values. We could resolve this by introducing an additional template parameter `AccT` that describes the type used for the variable `total` (and hence the return type). However, this would put an extra burden on all users of our template. An alternative approach to the extra parameter is to create an association between each type `T` for which `accum()` is called and the corresponding type that should be used to hold the accumulated value. **This association could be considered characteristic of the type `T`, and therefore the type in which the sum is computed is sometimes called a trait of `T`**.
+
+    ```c++
+    template<typename T>
+    struct AccumulationTraits;
+
+    template<>
+    struct AccumulationTraits<char> {
+        using AccT = int;
+    };
+
+    template<typename T>
+    auto accum (T const* beg, T const* end)
+    {
+        // return type is traits of the element type
+        using AccT = typename AccumulationTraits<T>::AccT;
+        
+        AccT total{}; // assume this actually creates a zero value
+        while (beg != end) {
+            total += *beg;
+            ++beg;
+        }
+        return total;
+    }
+    ```
+2) Traits are not limited to a main type as above, but can be associated to values as well. These are called *value traits*:
+    ```c++
+    template<typename T>
+    struct AccumulationTraits;
+
+    template<>
+    struct AccumulationTraits<char> {
+        using AccT = int;
+        static AccT const zero = 0;
+    };
+    ```
+
+    This way we can write `AccT total = AccumulationTraits<T>::zero;` to have the guarantee that `total` is initialized to zero for that specific type.
+
+3) The use of traits in `accum()` in the previous sections is called **fixed**, because once the decoupled trait is defined, it cannot be replaced in the algorithm. There may be cases when such overriding is desirable. We can address this problem by adding a template parameter `AT` for the trait itself having a default value determined by our traits template: `template<typename T, typename AT = AccumulationTraits<T>>`.
+
+4) So far we have equated accumulation with summation. However, we can imagine other kinds of accumulations. For example, we could multiply the sequence of given values. In all the alternatives, the only `accum() ` operation that needs to change is `total += *beg`. This operation can be called a **policy** of our accumulation process. Here is an example of how we could introduce such a policy in our `accum()` function template:
+    ```c++
+    template<typename T,
+    typename Policy = SumPolicy,
+    typename Traits = AccumulationTraits<T>>
+    auto accum (T const* beg, T const* end)
+    {
+        using AccT = typename Traits::AccT;
+        AccT total = Traits::zero();
+        while (beg != end) {
+            Policy::accumulate(total, *beg);
+            ++beg;
+        }
+        return total;
+    }
+    ```
+
+    In this case, we may recognize that the initialization of an accumulation loop is a part of the accumulation policy. This policy may or may not make use of the trait `zero()`. Other alternatives are not to be forgotten: not everything must be solved with traits and policies. For example, the `std::accumulate()` function of the C++ standard library takes the initial value as a third (function call) argument.
+
+5) 
+    - **Traits represent natural additional properties of a template parameter**
+    - **Policies represent configurable behavior for generic functions and types (often with some commonly used defaults)**
+    - **Traits can be useful as fixed traits (i.e., without being passed through template parameters)**
+    - **Traits mostly combine types and constants rather than member functions**
+    - **Policy classes don’t contribute much if they aren’t passed as template parameters**
+    - **Policy parameters need not have default values and are often specified explicitly**
+    - **Policy classes mostly combine member functions**
+
+6) To implement an accumulation policy, we can choose to express `SumPolicy` and `MultPolicy` as ordinary classes with a member template. An alternative consists of designing the policy class interface using class templates, which are then used as template template arguments:
+    ```c++
+    template<typename T1, typename T2>
+    class SumPolicy {
+    public:
+        static void accumulate (T1& total, T2 const& value) {
+            total += value;
+        }
+    };
+
+    template<typename T,
+    template<typename, typename> class Policy = SumPolicy, typename Traits = AccumulationTraits<T>>
+    auto accum (T const* beg, T const* end)
+    {
+        using AccT = typename Traits::AccT;
+        AccT total = Traits::zero();
+        while (beg != end) {
+            Policy<AccT,T>::accumulate(total, *beg);
+            ++beg;
+        }
+        return total;
+    }
+
+    ```
+
+7)  With templates, we can additionally define **type functions**: functions that takes some type as arguments and produce a type or a constant as a result. A very useful built-in type function is `sizeof`. How is a type function useful? For example, it allows us to parameterize a template in terms of a container type without also requiring parameters for the element type and other characteristics:
+    ```c++
+    // instead of:
+    template<typename T, typename C>
+    T sumOfElements (C const& c);
+
+    // we write:
+    template<typename C>
+    struct ElementT {
+        using Type = typename C::value_type;
+    };
+    template<typename C>
+    typename ElementT<C>::Type sumOfElements (C const& c);
+    ```
+
+8) In addition to providing access to particular aspects of a main parameter type, traits can also perform transformations on types, such as adding or removing references or `const` and `volatile` qualifiers. For example:
+    ```c++
+    template<typename T>
+    struct RemoveReferenceT {
+        using Type = T;
+    };
+
+    template<typename T>
+    struct RemoveReferenceT<T&> {
+        using Type = T;
+    };
+
+    template<typename T>
+    struct RemoveReferenceT<T&&> {
+        using Type = T;
+    };
+    ```
+    Again, a convenience alias template makes the usage simpler:
+    ```c++
+    template<typename T>
+        using RemoveReference = typename RemoveReference<T>::Type;
+    ```
+
+9) Transformation traits can be composed, such as creating a `RemoveCVT` trait that removes both `const` and `volatile`:
+    ```c++
+    template<typename T>
+        struct RemoveCVT : RemoveConstT<typename RemoveVolatileT<T>::Type> {
+    };
+    
+    template<typename T>
+        using RemoveCV = typename RemoveCVT<T>::Type;
+    ```
+
+10) A decay type trait can be implemented as follows:
+    ```c++
+    //  First, we define the nonarray, nonfunction case, which
+    //  simply deletes any const and volatile qualifiers
+    template<typename T>
+    struct DecayT : RemoveCVT<T> {};
+
+    // Next we handle arrays with known and unknown bounds
+    template<typename T>
+    struct DecayT<T[]> {
+        using Type = T*;
+    };
+
+    template<typename T, std::size_t N>
+    struct DecayT<T[N]> {
+        using Type = T*;
+    };
+
+    // Next we handle the function-to-pointer decay
+    template<typename R, typename... Args>
+    struct DecayT<R(Args...)> {
+        using Type = R (*)(Args...);
+    };
+
+    template<typename R, typename... Args>
+    struct DecayT<R(Args..., ...)> {
+        using Type = R (*)(Args..., ...);
+    };
+    ```
+    Note that the second partial specialization matches any function type that uses C-style varargs.
+
+11) In general, we can develop type functions that depend on multiple arguments:
+    ```c++
+    template<typename T1, typename T2>
+    struct IsSameT {
+        static constexpr bool value = false;
+    };
+
+    template<typename T>
+    struct IsSameT<T, T> {
+        static constexpr bool value = true;
+    };
+    ```
+
+    For traits that produce a constant value, we cannot provide an alias template, but we can provide a `constexpr` variable template that fulfills the same role:
+    ```c++
+    template<typename T1, typename T2>
+    constexpr bool isSame = IsSameT<T1, T2>::value;
+    ```
+
+12) Another example of type functions that deal with multiple types are **result type traits**. To motivate the idea, let’s write a function template that allows us to add two Array containers:
+    ```c++
+    template<typename T>
+    Array<T> operator+ (Array<T> const&, Array<T> const&);
+    ```
+
+    This would be nice, but because the language allows us to add a `char` value to an `int` value, we really would prefer to allow such mixed-type operations with arrays too. We are then faced with determining what the return type of the resulting template should be:
+    ```c++
+    template<typename T1, typename T2>
+    Array<???> operator+ (Array<T1> const&, Array<T2> const&);
+    ```
+    A result type template allows us to fill in the question marks in the previous declaration as follows:
+    ```c++
+    template<typename T1, typename T2>
+    Array<typename PlusResultT<T1, T2>::Type>
+    operator+ (Array<T1> const&, Array<T2> const&);
+    ```
+
+    This can be done as follows:
+    ```c++
+    template<typename T1, typename T2>
+    struct PlusResultT {
+        using Type = decltype(T1() + T2());
+    };
+
+    template<typename T1, typename T2>
+    using PlusResult = typename PlusResultT<T1, T2>::Type;
+    ```
+
+    This trait template uses `decltype` to compute the type of the expression `T1() + T2()`, leaving the hard work of determining the result type (including handling promotion rules and overloaded operators) to the compiler. However, for the purpose of our motivating example, `decltype` actually *preserves too much in- formation*: our formulation of `PlusResultT` may produce a reference type. In fact, what we want is to transform the result type by removing references and qualifiers, as discussed in the previous section:
+
+    ```c++
+    template<typename T1, typename T2>
+    Array<RemoveCV<RemoveReference<PlusResult<T1, T2>>>>
+    operator+ (Array<T1> const&, Array<T2> const&);
+    ```
+
+    Because the expression `T1() + T2()` attempts to value-initialize values of types T1 and T2, both of these types must have an accessible, nondeleted, default constructor (or be nonclass types). Fortunately, it is fairly easy to produce values for the + expression without requiring a constructor, by using a function that produces values of a given type T. For this, the C++ standard provides `std::declval<>`.  It is defined in `<utility>` simply as follows:
+    ```c++
+    namespace std {
+    template<typename T>
+        add_rvalue_reference_t<T> declval() noexcept;
+    }
+    ```
+
+    This function template is intentionally left undefined because it’s only meant to be used within `decltype`, `sizeof`, or some other context where no definition is ever needed. So we can write:
+    ```c++
+    template<typename T1, typename T2>
+    struct PlusResultT {
+        using Type = decltype(std::declval<T1>() + std::declval<T2>());
+    };
+    ```
+13) While originally intended to avoid spurious failures with function template overloading, SFINAE also enables remarkable compile-time techniques that can determine if a particular type or expression is valid. Our first foray into SFINAE-based traits illustrates the basic technology using SFINAE with function overloading to find out whether a type is default constructible, so that you can create objects without any value for initialization:
+    ```c++
+    template<typename T>
+    struct IsDefaultConstructibleT {
+    private:
+        // test() trying substitute call of a default constructor for T passed as U:
+        template<typename U, typename = decltype(U())>
+        static char test(void*);
+        // test() fallback:
+        template<typename>
+        static long test(...);
+    public:
+        static constexpr bool value
+        = IsSameT<decltype(test<T>(nullptr)), char>::value;
+    };
+    ```
+
+     The second overload is the fallback: It always matches the call, but because it matches “with ellipsis” (i.e., a vararg parameter), any other match would be preferred. Note that we can’t use the template parameter `T` in the first `test()` directly. Another implementation is as follows:
+     ```c++
+    template<typename T>
+    struct IsDefaultConstructibleHelper {
+    private:
+        // test() trying substitute call of a default constructor for T passed as U:
+        template<typename U, typename = decltype(U())>
+        static std::true_type test(void*);
+        // test() fallback:
+        template<typename>
+        static std::false_type test(...);
+    public:
+        using Type = decltype(test<T>(nullptr));
+    };
+    
+    template<typename T>
+    struct IsDefaultConstructibleT : IsDefaultConstructibleHelper<T>::Type {
+    };
+     ```
+    This is the preferred way since a predicate trait, which returns a Boolean value, should return a value derived from `std::true_type` or `std::false_type`.
+
+14) The second approach to implement SFINAE-based traits uses partial specialization. Again, we can use the example to find out whether a type `T` is default constructible:
+    ```c++
+    // helper to ignore any number of template parameters:
+    template<typename...> using VoidT = void;
+
+    // primary template:
+    template<typename, typename = VoidT<>>
+    struct IsDefaultConstructibleT : std::false_type
+    {};
+
+    // partial specialization (may be SFINAE’d away):
+    template<typename T>
+    struct IsDefaultConstructibleT<T, VoidT<decltype(T())>> : std::true_type
+    {};
+    ```
+
+    In C++17, the C++ standard library introduced a type trait `std::void_t<>` that corresponds to the type `VoidT` introduced here.
+
+15) In general, a type trait should be able to answer a particular query without causing the program to become ill-formed. Recall the definition of `PlusResultT`:
+    ```c++
+    template<typename T1, typename T2>
+    struct PlusResultT {
+    using Type = decltype(std::declval<T1>() + std::declval<T2>());
+    };
+
+    template<typename T1, typename T2>
+    using PlusResult = typename PlusResultT<T1, T2>::Type;
+    ```
+    In this definition, the + is used in a context that is not protected by SFINAE. 
+    Therefore, if a program attempts to evaluate `PlusResultT` for types that do not have a suitable + operator, the evaluation of `PlusResultT` itself will cause the program to become ill-formed, as in the following attempt to declare the return type of adding arrays of unrelated types A and B:
+
+    ```c++
+    template<typename T>
+    class Array {
+    ...
+    };
+
+    // declare + for arrays of different element types:
+    template<typename T1, typename T2>
+    Array<typename PlusResultT<T1, T2>::Type>
+    operator+ (Array<T1> const&, Array<T2> const&);
+    ```
+
+    The program may fail to compile even if we add a specific overload to adding A and B arrays, because C++ does not specify whether the types in a
+    function template are actually instantiated if another overload would be better:
+
+    ```c++
+    // declare generic + for arrays of different element types:
+    template<typename T1, typename T2>
+    Array<typename PlusResultT<T1, T2>::Type>
+    operator+ (Array<T1> const&, Array<T2> const&);
+
+    // overload + for concrete types:
+    Array<A> operator+(Array<A> const& arrayA, Array<B> const& arrayB);
+
+    void addAB(Array<A> const& arrayA, Array<B> const& arrayB) {
+        auto sum = arrayA + arrayB;  // ERROR?: depends on whether the compiler
+        // instantiates PlusResultT<A,B>
+        ...
+    }
+    ```
+
+    If the compiler can determine that the second declaration of operator+ is a better match without performing deduction and substitution on the first (template) declaration of operator+, it will accept this code. However, while deducing and substituting a function template candidate, anything that happens during the instantiation of the definition of a class template is not part of the immediate context of that function template substitution, and SFINAE does not protect us from attempts to form invalid types or expressions there.
+
+    To solve this problem, we have to make the `PlusResultT` **SFINAE-friendly**:
+
+    ```c++
+    template<typename, typename, typename = std::void_t<>>
+    struct HasPlusT : std::false_type{};
+
+    // partial specialization (may be SFINAE’d away):
+    template<typename T1, typename T2>
+    struct HasPlusT<T1, T2, std::void_t<decltype(std::declval<T1>() + std::declval<T2>())>>
+    : std::true_type {};
+
+    template<typename T1, typename T2, bool = HasPlusT<T1, T2>::value>
+    struct PlusResultT {
+        // primary template, used when HasPlusT yields true
+        using Type = decltype(std::declval<T1>() + std::declval<T2>());
+    };
+    
+    template<typename T1, typename T2>
+    struct PlusResultT<T1, T2, false> {};
+    ```
+
+16) Consider the following trait:
+    ```c++
+    #include <type_traits>
+
+    // helper to ignore any number of template parameters:
+    template<typename...> using VoidT = void;
+    // primary template:
+    template<typename, typename = VoidT<>>
+    struct HasSizeTypeT : std::false_type
+    {};
+
+    // partial specialization (may be SFINAE’d away):
+    template<typename T>
+    struct HasSizeTypeT<T, VoidT<typename T::size_type>> : std::true_type
+    {};
+    ```
+
+    This trait checks for a member type `size_type`. (It’s also worth noting that this trait technique will also produce a true value for injected class names). Defining a trait such as `HasSizeTypeT` raises the question of how to parameterize the trait to be able to check for any member type name. Unfortunately, this can currently be achieved only via macros, because there is no language mechanism to describe a “potential” name (until C++26 reflection):
+
+    ```c++
+    #include <type_traits>
+    #define DEFINE_HAS_TYPE(MemType) \
+    template<typename, typename = std::void_t<>> \
+    struct HasTypeT_##MemType \
+    : std::false_type { }; \
+    template<typename T> \
+    struct HasTypeT_##MemType<T, std::void_t<typename T::MemType>> \
+    : std::true_type { }
+    ```
+
+17) `decltype(call-expression)` does not require a nonreference, non-void return type to be complete, unlike call expressions in other contexts. Using `decltype(std::declval<T>().begin(), 0)` instead does add the requirement that the return type of the call is complete, because the returned value is no longer the result of the `decltype` operand.
+
+18) Some boilerplate code is always needed to define traits: overloading and calling two `test()` member functions or implementing multiple partial specializations. Next, we will show how in C++17, we can minimize this boilerplate by specifying the condition to be checked in a generic lambda:
+    ```c++
+    // helper: checking validity of f(args...) for F f and Args... args:
+    template<typename F, typename... Args, typename = decltype(std::declval<F>()(std::declval<Args&&>()...))>
+    std::true_type isValidImpl(void*);
+
+    // fallback if helper SFINAE’d out:
+    template<typename F, typename... Args>
+    std::false_type isValidImpl(...);
+
+    // define a lambda that takes a lambda f and returns whether calling f with args is valid
+    inline constexpr auto isValid = [](auto f) {
+        return [](auto&&... args) {
+            return decltype(isValidImpl<decltype(f), decltype(args)&&...>(nullptr)){};
+        };
+    };
+
+    // helper template to represent a type as a value
+    template<typename T>
+    struct TypeT {
+        using Type = T;
+    };
+
+    // helper to wrap a type as a value
+    template<typename T>
+    constexpr auto type = TypeT<T>{};
+
+    // helper to unwrap a wrapped type in unevaluated contexts
+    template<typename T>
+    T valueT(TypeT<T>); // no definition needed
+    ```
+
+    Then we can do:
+
+    ```c++
+    // define to check for data member first:
+    constexpr auto hasFirst = isValid([](auto x) -> decltype((void)valueT(x).first) {});
+    cout << "hasFirst: " << hasFirst(type<pair<int,int>>) << '\n'; // true
+
+    // define to check for member type size_type:
+    constexpr auto hasSizeType = isValid([](auto x) -> typename decltype(valueT(x))::size_type {});
+    struct CX {
+        using size_type = std::size_t;
+    };
+    cout << "hasSizeType: " << hasSizeType(type<CX>) << '\n'; // true
+    ```
+
+19) Another example of a trait:
+    ```c++
+    // primary template: yield the second argument by default and rely on 
+    // a partial specialization to yield the third argument
+    // if COND is false
+    template<bool COND, typename TrueType, typename FalseType>
+    struct IfThenElseT {
+        using Type = TrueType;
+    };
+
+    // partial specialization: false yields third argument
+    template<typename TrueType, typename FalseType>
+    struct IfThenElseT<false, TrueType, FalseType> {
+        using Type = FalseType;
+    };
+
+    template<bool COND, typename TrueType, typename FalseType>
+    using IfThenElse = typename IfThenElseT<COND, TrueType, FalseType>::Type;
+    ```
+
+    Note that, unlike a normal C++ if-then-else statement, the template arguments for both the “then” and “else” branches are evaluated before the selection is made, so neither branch may contain ill-formed code, or the program is likely to be ill-formed. Suppose we want to make a trait that makes a type unsigned if it makes sense to do so, otherwise just return the passed type. This naive solution is invalid:
+
+    ```c++
+    template<typename T>
+    struct UnsignedT {
+    using Type = IfThenElse<std::is_integral<T>::value && !std::is_same<T, bool>::value,
+        typename std::make_unsigned<T>::type, T>;
+    };
+    ```
+    The instantiation of `UnsignedT<bool>` is still undefined behavior, because the compiler will still attempt to form the type from `typename std::make_unsigned<T>::type`. We can solve this using indirection like:
+
+    ```c++
+    // yield T when using member Type:
+    template<typename T>
+    struct IdentityT {
+        using Type = T;
+    };
+
+    // to make unsigned after IfThenElse was evaluated:
+    template<typename T>
+    struct MakeUnsignedT {
+        using Type = typename std::make_unsigned<T>::type;
+    };
+
+    template<typename T>
+    struct UnsignedT {
+        using Type = typename IfThenElse<std::is_integral<T>::value && !std::is_same<T,bool>::value,
+                MakeUnsignedT<T>,
+                IdentityT<T>
+            >::Type;
+    };
+    ```
+    The `IfThenElseT` template is available in the C++ standard library as `std::conditional<>`.
+
+20) This is another trait that checks whether a move contructor throws:
+    ```c++
+    template<typename T>
+    struct IsNothrowMoveConstructibleT
+    : std::bool_constant<noexcept(T(std::declval<T>()))>
+    {};
+    ```
+    However, this is not SFINAE-friendly, since `T(std::declval<T>())` is invalid if the trait is instantiated with a type that does not have a usable move or copy constructor:
+
+    ```c++
+    // primary template:
+    template<typename T, typename = std::void_t<>>
+    struct IsNothrowMoveConstructibleT : std::false_type
+    {};
+
+    // partial specialization (may be SFINAE’d away):
+    template<typename T>
+    struct IsNothrowMoveConstructibleT
+    <T, std::void_t<decltype(T(std::declval<T>()))>>
+    : std::bool_constant<noexcept(T(std::declval<T>()))>
+    {};
+    ```
+
+    Note that there is no way to check whether a move constructor throws without being able to call it directly. That is, it is not enough that the move constructor is public and not deleted, it also requires that the corresponding type is no abstract class (references or pointers to abstract classes work fine). For this reason, the type trait is named `IsNothrowMoveConstructible` instead of `HasNothrowMoveConstructor`.
+
+21) Alias templates can be useful to reduce verbosity of traits; for example given:
+    ```c++
+    template<typename T1, typename T2>
+    Array<typename RemoveCVT<
+            typename RemoveReferenceT<typename PlusResultT<T1, T2>::Type>::Type
+        >::Type
+    >
+    operator+ (Array<T1> const&, Array<T2> const&);
+    ```
+    We can do:
+
+    ```c++
+    template<typename T>
+        using RemoveCV = typename RemoveCVT<T>::Type;
+
+    template<typename T>
+        using RemoveReference = typename RemoveReferenceT<T>::Type;
+
+    template<typename T1, typename T2>
+        using PlusResult = typename PlusResultT<T1, T2>::Type;
+
+    template<typename T1, typename T2>
+    Array<RemoveCV<RemoveReference<PlusResultT<T1, T2>>>>
+    operator+ (Array<T1> const&, Array<T2> const&);
+    ```
+
+    Note that alias templates cannot be specialized. In the Standard Library the type traits class templates yield a type in `type` and have no specific suffix (many were introduced in C++11). Corresponding alias templates (that produce the type directly) started being introduced in C++14, and were given a `_t` suffix.
+
+    Similarly `constexpr` variable templates offer a way to reduce verbosity for traits returning a `::value`. 
