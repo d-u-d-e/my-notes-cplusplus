@@ -1975,4 +1975,314 @@ to match a partial specialization an invalid construct is formed, that specializ
 
     Note that alias templates cannot be specialized. In the Standard Library the type traits class templates yield a type in `type` and have no specific suffix (many were introduced in C++11). Corresponding alias templates (that produce the type directly) started being introduced in C++14, and were given a `_t` suffix.
 
-    Similarly `constexpr` variable templates offer a way to reduce verbosity for traits returning a `::value`. 
+    Similarly `constexpr` variable templates offer a way to reduce verbosity for traits returning a `::value`.
+
+22) In C and C++, function call arguments are passed by value by default. With templates, of course, things get a little more delicate: we don’t know a priori how large the type substituted for the template parameter will be. Furthermore, the decision doesn’t depend just on size: a small structure may come with an expensive copy constructor that would still justify passing read-only parameters by reference-to-const. This problem is conveniently handled using a policy traits template that is a type function: the function maps an intended argument type `T` onto the optimal parameter type `T` or `T const&`. As a first approximation, the primary template can use by-value passing for types no larger than two pointers and by reference-to-const for everything else:
+    ```c++
+    template<typename T>
+    struct RParam {
+        using Type = typename IfThenElseT<sizeof(T) <= 2*sizeof(void*),
+        T,
+        T const&>::Type;
+    };
+    ```
+    On the other hand, container types for which sizeof returns a small value may involve expensive copy constructors, so we may need many specializations and partial specializations, such as the following:
+
+    ```c++
+    template<typename T>
+    struct RParam<Array<T>> {
+        using Type = Array<T> const&;
+    };
+    ```
+
+    Or:
+
+    ```c++
+    template<typename T>
+    struct RParam {
+        using Type = IfThenElse<(sizeof(T) <= 2*sizeof(void*)
+        && std::is_trivially_copy_constructible<T>::value
+        && std::is_trivially_move_constructible<T>::value),
+        T,
+        T const&>;
+    };
+    ```
+
+    Then client code can do:
+
+    ```c++
+    template<typename T1, typename T2>
+    void foo (typename RParam<T1>::Type p1, typename RParam<T2>::Type p2)
+    {
+        ...
+    }
+    ```
+
+    Unfortunately, there are some significant downsides to using `RParam`. First, the function declaration is significantly messier. Second, and perhaps more objectionable, is the fact that a function like `foo()` cannot be called with argument deduction because the template parameter appears only in the qualifiers of the function parameters. Call sites must therefore specify explicit template arguments. An unwieldy workaround for this option is the use of an inline wrapper function template that provides perfect forwarding, but it assumes the inline function will be elided by the compiler:
+
+    ```c++
+    // function that allows parameter passing by value or by reference
+    template<typename T1, typename T2>
+    void foo_core (typename RParam<T1>::Type p1, typename RParam<T2>::Type p2)
+    {
+        ...
+    }
+
+    // wrapper to avoid explicit template parameter passing
+    template<typename T1, typename T2>
+    void foo (T1 && p1, T2 && p2)
+    {
+        foo_core<T1,T2>(std::forward<T1>(p1),std::forward<T2>(p2));
+    }
+    ```
+
+## Chapter 20: Overloading on Type Properties
+
+1) Consider the `advanceIter()` function which moves an iterator `x` forward by `n` steps. This general algorithm can operate on any input iterator:
+    ```c++
+    template<typename InputIterator, typename Distance>
+    void advanceIter(InputIterator& x, Distance n)
+    {
+        while (n > 0) { // linear time
+            ++x;
+            --n;
+        }
+    }
+    ```
+
+    For a certain class of iterators—those that provide random access operations—we can provide a more efficient implementation:
+
+    ```c++
+    template<typename RandomAccessIterator, typename Distance>
+    void advanceIter(RandomAccessIterator& x, Distance n) {
+        x += n;
+        // constant time
+    }
+    ```
+
+    **Unfortunately, defining both of these function templates will result in a compiler error, because function templates that differ only based on their template parameter names are not overloadable.**
+
+2) One approach to algorithm specialization is to “tag” different implementation variants of an algorithm with a unique type that identifies that variant. This is called **tag dispatching**:
+
+    ```c++
+        template<typename Iterator, typename Distance>
+        void advanceIterImpl(Iterator& x, Distance n, std::random_access_iterator_tag) {
+            x += n;
+            // constant time
+        }
+
+        template<typename Iterator, typename Distance>
+        void advanceIter(Iterator& x, Distance n)
+        {
+            advanceIterImpl(x, n, typename std::iterator_traits<Iterator>::iterator_category());
+        }
+    ```
+
+    Tag dispatching works well when there is a natural hierarchical structure to the properties used by the algorithm and an existing set of traits that provide those tag values.
+
+3) Another technique is based on the `EnableIf` trait that enable or disable the function:
+
+    ```c++
+    template<typename Iterator>
+    constexpr bool IsRandomAccessIterator =
+    IsConvertible<
+        typename std::iterator_traits<Iterator>::iterator_category,
+        std::random_access_iterator_tag>;
+    
+    template<typename Iterator, typename Distance>
+    EnableIf<IsRandomAccessIterator<Iterator>>
+    advanceIter(Iterator& x, Distance n) {
+        x += n; // constant time
+    }
+    ```
+    The `EnableIf` specialization here is used to enable this variant of `advanceIter()` only when the
+    iterator is in fact a random access iterator.
+
+    ```c++
+    template<bool, typename T = void>
+        struct EnableIfT {
+    };
+    
+    template<typename T>
+    struct EnableIfT<true, T> {
+        using Type = T;
+    };
+    
+    template<bool Cond, typename T = void>
+    using EnableIf = typename EnableIfT<Cond, T>::Type;
+    ```
+
+    When the condition is `false`, `EnableIf` does not produce a valid type, because the primary class template for `EnableIfT` has no member named `Type`. Normally, this would be an error, but in a SFINAE context—such as the return type of a function template—it has the effect of causing template argument deduction to fail, removing the function template from consideration.
+    **We now have established how to explicitly “activate” the more specialized template for the types to which is applies. However, that is not sufficient: we also have to “de-activate” the less specialized template, because a compiler has no way to “order” the two and will report an ambiguity error if both versions apply**. We just use the same `EnableIf` pattern on the less specialized template, except that we negate the condition expression:
+
+    ```c++
+    template<typename Iterator, typename Distance>
+    EnableIf<!IsRandomAccessIterator<Iterator>>
+    advanceIter(Iterator& x, Distance n)
+    {
+        while (n > 0) { // linear time
+            ++x;
+            --n;
+        }
+    }
+    ```
+
+4) The previous pattern generalizes to cases where more than two alternative implementations are needed: we equip each alternative with `EnableIf` constructs whose conditions are mutually exclusive for a specific set of concrete template arguments. Generally speaking, tag dispatching supports simple dispatching based on hierarchical tags, while `EnableIf` supports more advanced dispatching based on arbitrary sets of properties determined by type traits.
+
+5) `EnableIf` is typically used in the return type of the function template. However, this approach does not work for constructor templates or conversion function templates, because neither has a specified return type. In such cases, we can instead embed the `EnableIf` in a defaulted template argument:
+
+    ```c++
+    template<typename T>
+    class Container {
+    public:
+    // construct from an input iterator sequence:
+    template<typename Iterator, typename = EnableIf<IsInputIterator<Iterator>>> Container(Iterator first, Iterator last);
+    
+    // convert to a container so long as the value types are convertible:
+    template<typename U, typename = EnableIf<IsConvertible<T, U>>> operator Container<U>() const; };
+    ```
+
+    However, there is a problem here. If we attempt to add yet another overload (e.g., a more efficient version of the `Container` constructor for random access iterators), it will result in an error:
+    
+    ```c++
+    template<typename Iterator, typename = EnableIf<IsInputIterator<Iterator> &&
+    !IsRandomAccessIterator<Iterator>>>
+    Container(Iterator first, Iterator last);
+    ```
+
+    The problem is that the two constructor templates are identical except for the default template argument, but default template arguments are not considered when determining whether two templates are equivalent. We can alleviate this problem by adding yet another defaulted template parameter, so the two constructor templates have a different number of template parameters:
+
+    ```c++
+    template<typename Iterator, typename = EnableIf<IsRandomAccessIterator<Iterator>>, typename = int>
+    // extra dummy parameter to enable both constructors
+    Container(Iterator first, Iterator last); // OK now
+    ```
+
+6) It’s worth noting here that C++17’s `constexpr` if feature (see Section 8.5 on page 134) avoids the need for `EnableIf` in many cases:
+
+    ```c++
+    template<typename Iterator, typename Distance>
+    void advanceIter(Iterator& x, Distance n) 
+    {
+        if constexpr(IsRandomAccessIterator<Iterator>) 
+        {
+            // implementation for random access iterators:
+            x += n;
+            // constant time
+        }
+        else if constexpr(IsBidirectionalIterator<Iterator>) 
+        {
+            // implementation for bidirectional iterators:
+            if (n > 0) {
+                for ( ; n > 0; ++x, --n) {}
+            }
+            else {
+                for ( ; n < 0; --x, ++n) {}
+            }
+        }
+        else{
+            ...
+        }
+    }
+    ```
+
+    **However, there are downsides. Using constexpr if in this way is only possible when the difference in the generic component can be expressed entirely within the body of the function template. We still need `EnableIf` in the following situations:**
+
+    - Different “interfaces” are involved
+    - Different class definitions are needed
+    - No valid instantiation should exist for certain template argument lists
+
+    C++20 concepts solve all of these problems as well. The `requires` clause has additional benefits over `EnableIf`. Constraint subsumption provides an ordering among templates that differ only in their requires clauses, eliminating the need for tag dispatching. Additionally, a `requires` clause can be attached to a nontemplate.
+
+7) The way to enable/disable different implementations of class templates is to use enabled/disabled partial specializations of class templates. To use `EnableIf` with class template partial specializations, we first introduce an unnamed, defaulted template parameter like `void`. This new template parameter serves as an anchor for `EnableIf`, which now can be embedded in the template argument list of the partial specialization. Unlike with overloaded function templates, we don’t need to disable any condition on the primary template, because any partial specialization takes precedence over the primary template:
+
+    ```c++
+    template<typename Key, typename Value>
+    class Dictionary<Key, Value, EnableIf<HasLess<Key>>>
+    {
+    private:
+        map<Key, Value> data;
+    public:
+    value& operator[](Key const& key) {
+        return data[key];
+    }
+    ...
+    };
+    ```
+
+     However, when we add another implementation for keys with a hashing operation, we need to ensure that the conditions on the partial specializations are mutually exclusive.
+
+8) Tag dispatching, too, can be used to select among class template partial specializations. The challenge is finding the best match for the tag:
+
+    ```c++
+    // primary template (intentionally undefined):
+    template<typename Iterator,
+        typename Tag = BestMatchInSet<typename std::iterator_traits<Iterator>::iterator_category,
+            std::input_iterator_tag,
+            std::bidirectional_iterator_tag,
+            std::random_access_iterator_tag>>
+    class Advance;
+
+    // bidirectional, constant-time algorithm for random access iterators:
+    template<typename Iterator>
+    class Advance<Iterator, std::random_access_iterator_tag>
+    {
+    public:
+    using DifferenceType = typename std::iterator_traits<Iterator>::difference_type;
+        void operator() (Iterator& x, DifferenceType n) const
+        {
+            x += n;
+        }
+    }
+
+    // ... other specializations
+    ```
+
+    `BestMatchInSet` is implemented by emulating overload resolution:
+
+    ```c++
+    // construct a set of match() overloads for the types in Types...:
+    template<typename... Types>
+    struct MatchOverloads;
+
+    // basis case: nothing matched:
+    template<>
+    struct MatchOverloads<> {
+        static void match(...);
+    };
+
+    // recursive case: introduce a new match() overload:
+    template<typename T1, typename... Rest>
+    struct MatchOverloads<T1, Rest...> : public MatchOverloads<Rest...> {
+        static T1 match(T1);
+        // introduce overload for T1
+        using MatchOverloads<Rest...>::match; // collect overloads from bases
+    };
+
+    // find the best match for T in Types...:
+    template<typename T, typename... Types>
+    struct BestMatchInSetT {
+        using Type = decltype(MatchOverloads<Types...>::match(declval<T>()));
+    };
+
+    template<typename T, typename... Types>
+    using BestMatchInSet = typename BestMatchInSetT<T, Types...>::Type;
+    ```
+
+    In C++17, one can eliminate the recursion with pack expansions in the base class list and in a `using` declaration.
+
+9) What if we took this notion of `EnableIf` to the extreme and encoded every operation that the template performs on its template arguments as part of the `EnableIf` condition? The instantiation of such a template could never fail, because template arguments that do not provide the required operations would cause a deduction failure (via `EnableIf`) rather than allowing the instantiation to proceed. We refer to such templates as **“instantiation-safe”** templates. For example, take:
+
+    ```c++
+    template<typename T>
+    T const& min(T const& x, T const& y)
+    {
+        if (y < x) {
+            return y;
+        }
+        return x;
+    }
+    ```
+    This template requires the type `T` to have a `< operator` able to compare two `T` values (specifically, two `T const` lvalues) and then implicitly convert the result of that comparison to `bool` for use in the `if` statement.
+
+## Chapter 21: Templates and Inheritance
