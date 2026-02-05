@@ -1383,6 +1383,8 @@ to match a partial specialization an invalid construct is formed, that specializ
 
 14) Template argument deduction for pack expansions only works when the pack expansion occurs at the end of the parameter or argument list.
 
+## Chapter 17: Future Directions
+
 ## Chapter 18: The Polymorphic Power of Templates
 
 1) Templates can also be used to implement polymorphism. However, they don’t rely on the factoring of common behavior in base classes.
@@ -2425,3 +2427,5 @@ to match a partial specialization an invalid construct is formed, that specializ
     This formulation requires some more work for each class that will be mixed in, so classes such as `Label` and `Color` will need to become class templates. However, the mixed-in classes can now tailor their behavior to the specific instance of the derived class they’ve been mixed into. For example, we can mix the previously discussed `ObjectCounter` template into `Point` to count the number of points created by `Polygon` and compose that mixin with other application-specific mixins as well.
 
 ## Chapter 22: Bridging Static and Dynamic Polymorphism
+
+## Chapter 23: Metaprogramming
