@@ -2429,3 +2429,5 @@ to match a partial specialization an invalid construct is formed, that specializ
 ## Chapter 22: Bridging Static and Dynamic Polymorphism
 
 ## Chapter 23: Metaprogramming
+
+1) *Value metaprogramming* is the computation of compile-time values. Prior to C++14/C++11 this was done using recursive template instantiations, but C++14 removed most of that challenge with the introduction of `constexpr` functions.
