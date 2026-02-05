@@ -2286,3 +2286,142 @@ to match a partial specialization an invalid construct is formed, that specializ
     This template requires the type `T` to have a `< operator` able to compare two `T` values (specifically, two `T const` lvalues) and then implicitly convert the result of that comparison to `bool` for use in the `if` statement.
 
 ## Chapter 21: Templates and Inheritance
+
+1) The designers of C++ had various reasons to avoid zero-size classes. For example, an array of zero- size classes would presumably have size zero too, but then the usual properties of pointer arithmetic would no longer apply. Even though there are no zero-size types in C++, the C++ standard does specify that when an empty class is used as a base class, no space needs to be allocated for it provided that it does not cause it to be allocated to the same address as another object or subobject of the same type.
+
+    The EBCO (**Empty Base Class Optimization**) is an important optimization for template libraries because a number of techniques rely on the introduction of base classes simply for the purpose of introducing new type aliases or providing extra functionality without adding new data.
+
+2) In the context of templates, template parameters are often substituted with empty class types:
+    ```c++
+    template<typename T1, typename T2>
+    class MyClass {
+    private:
+        T1 a;
+        T2 b;
+    ...
+    };
+    ```
+    It is entirely possible that one or both template parameters are substituted by an empty class type. If this is the case, then the representation of `MyClass<T1,T2>` may be suboptimal and may waste a word of memory for every instance of a `MyClass<T1,T2>`. This can be avoided by making the template arguments base classes instead:
+
+    ```c++
+    template<typename T1, typename T2>
+    class MyClass : private T1, private T2 {
+    };
+    ```
+
+    However, this straightforward alternative has its own set of problems: it doesn’t work when `T1` or `T2` is substituted with a nonclass type or with a union type, it also doesn’t work when the two parameters are substituted with the same type, the class may be `final`.
+
+    A more practical tool can be devised for the common case when a template parameter is known to be substituted by class types only and when another member of the class template is available. The main idea is to "merge" the potentially empty type parameter with the other member using the EBCO. For example, instead of writing:
+
+    ```c++
+    template<typename CustomClass>
+    class Optimizable {
+    private:
+        CustomClass info; // might be empty
+        void* storage;
+    ...
+    };
+    ```
+    A template implementer would use the following:
+
+    ```c++
+    template<typename CustomClass>
+    class Optimizable {
+    private:
+        BaseMemberPair<CustomClass, void*> info_and_storage;
+    ...
+    };
+    ```
+    `BaseMemberPair` simply inherits from `CustomClass`.
+
+3) Another pattern is the **Curiously Recurring Template Pattern (CRTP)**. This oddly named pattern refers to a general class of techniques that consists of passing a derived class as a template argument to one of its own base classes. In its simplest form, C++ code for such a pattern looks as follows:
+    ```c++
+    template<typename Derived>
+    class CuriousBase {
+        ...
+    };
+
+    class Curious : public CuriousBase<Curious> {
+        ...
+    };
+    ```
+
+    Or even:
+
+    ```c++
+    template<typename Derived>
+    class CuriousBase {
+        ...
+    };
+
+    template<typename T>
+    class CuriousTemplate : public CuriousBase<CuriousTemplate<T>> {
+        ...
+    };
+    ```
+
+    By passing the derived class down to its base class via a template parameter, the base class can customize its own behavior to the derived class without requiring the use of virtual functions.
+
+4) A simple application of CRTP consists of keeping track of how many objects of a certain class type were created.
+
+5) CRTP can be useful for **facades**: a CRTP base class defines most or all of the public interface of a class in terms of a much smaller (but easier to implement) interface exposed by the CRTP derived class. This pattern, called the **facade pattern**, is particularly useful when defining new types that need to meet the requirements of some existing interface—numeric types, iterators, containers, and so on.
+
+6) **Mixins** provide an alternative way to customize the behavior of a type without inheriting from it. Mixins essentially invert the normal direction of inheritance, because the new classes are "mixed in" to the inheritance hierarchy as base classes of a class template rather than being created as a new derived class. This approach allows the introduction of new data members and other operations without requiring any duplication of the interface.
+
+    A class template that supports mixins will typically accept an arbitrary number of extra classes from which it will derive:
+
+    ```c++
+
+    template<typename P>
+    class Polygon
+    {
+    private:
+        std::vector<P> points;
+    public:
+    ... // public operations
+    };
+
+    template<typename... Mixins>
+    class Point : public Mixins...
+    {
+    public:
+        double x, y;
+        Point() : Mixins()..., x(0.0), y(0.0) { }
+        Point(double x, double y) : Mixins()..., x(x), y(y) { }
+    };
+
+    class Label
+    {
+    public:
+        std::string label;
+        Label() : label("") { }
+    };
+    using LabeledPoint = Point<Label>;
+
+    class Color
+    {
+    public:
+        unsigned char red = 0, green = 0, blue = 0;
+    };
+    using MyPoint = Point<Label, Color>;
+    ```
+
+    With this mixin-based Point, it becomes easy to introduce additional information to `Point` without changing its interface, so `Polygon` becomes easier to use and evolve. Users need only apply the implicit conversion from the Point specialization to their mixin class (`Label` or `Color`, above) to access that data or interface.
+
+    Mixins are useful in cases where a template needs some small level of customization—such as decorating internally stored objects with user-specified data.
+
+7) Mixins can be made more powerful by combining them with the Curiously Recurring Template Pattern (CRTP). Here, each of the mixins is actually a class template that will be provided with the type of the derived class. A CRTP-mixin version of `Point` would be written as follows:
+    ```c++
+    template<template<typename>... Mixins>
+    class Point : public Mixins<Point>...
+    {
+    public:
+        double x, y;
+        Point() : Mixins<Point>()..., x(0.0), y(0.0) { }
+        Point(double x, double y) : Mixins<Point>()..., x(x), y(y) { }
+    };
+    ```
+
+    This formulation requires some more work for each class that will be mixed in, so classes such as `Label` and `Color` will need to become class templates. However, the mixed-in classes can now tailor their behavior to the specific instance of the derived class they’ve been mixed into. For example, we can mix the previously discussed `ObjectCounter` template into `Point` to count the number of points created by `Polygon` and compose that mixin with other application-specific mixins as well.
+
+## Chapter 22: Bridging Static and Dynamic Polymorphism
