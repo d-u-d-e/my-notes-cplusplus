@@ -2431,3 +2431,15 @@ to match a partial specialization an invalid construct is formed, that specializ
 ## Chapter 23: Metaprogramming
 
 1) *Value metaprogramming* is the computation of compile-time values. Prior to C++14/C++11 this was done using recursive template instantiations, but C++14 removed most of that challenge with the introduction of `constexpr` functions.
+
+2) It is important to remember that defining a type alias for a class template instance does not cause a C++ compiler to instantiate the body of that instance.
+
+3) A template metaprogram can contain:
+    - State variables: The template parameters
+    - Loop constructs: Through recursion
+    - Execution path selection: By using conditional expressions or specializations
+    - Integer arithmetic
+
+    If there are no limits to the amount of recursive instantiations and the number of state variables that are allowed, it can be shown that this is sufficient to compute anything that is computable. However, it may not be convenient to do so using templates. Furthermore, because template instantiation requires substantial compiler resources, extensive recursive instantiation quickly slows down a compiler or even exhausts the resources available. The C++ standard recommends but does not mandate that 1024 levels of recursive instantiations be allowed as a minimum, which is sufficient for most (but certainly not all) template metaprogramming tasks.
+
+## Chapter 24: Typelists
