@@ -2447,3 +2447,5 @@ to match a partial specialization an invalid construct is formed, that specializ
 1) See `examples/typelists.hpp` for a list of examples with typelists. We can do insertion sort at compile time with templates!
 
 ## Chapter 25: Tuples
+
+1) Tuple algorithms are particularly interesting because they require both compile-time and run-time computation. See `examples/tuples/` for a custom tuple implementation (incomplete). For example, reversing a `Tuple<int, double, string>` produces a `Tuple<string, double, int>`.
