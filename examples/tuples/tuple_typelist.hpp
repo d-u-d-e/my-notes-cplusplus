@@ -1,3 +1,4 @@
+#pragma once
 #include "../typelists.hpp"
 #include "tuple.hpp"
 
