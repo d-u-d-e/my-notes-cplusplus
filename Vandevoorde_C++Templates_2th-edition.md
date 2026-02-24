@@ -2449,3 +2449,9 @@ to match a partial specialization an invalid construct is formed, that specializ
 ## Chapter 25: Tuples
 
 1) Tuple algorithms are particularly interesting because they require both compile-time and run-time computation. See `examples/tuples/` for a custom tuple implementation (incomplete). For example, reversing a `Tuple<int, double, string>` produces a `Tuple<string, double, int>`.
+
+2) Implementing the subscript `[]` operator isn't very satisfying. This is because the operator requires an index parameter. So we need to make the index a template parameter, and pass a `CTValue` embedding the index as the type of the operator paramater. Then we can dispatch using `get`. We can use literals to construct the `CTValue`. This is done at page 599, and the approach is adopted by Boost.
+
+3) Index lists have become so critical to the performance of `tuple` and type list algorithms, that compilers include an intrinsic alias template such as `__make_integer_seq<S, T, N>` that expands to `S<T, 0, 1, ..., N>` without additional template instantiations, thereby accelerating applications of `std::make_index_sequence` and `make_integer_sequence`.
+
+## Chapter 26: Discriminated Unions
