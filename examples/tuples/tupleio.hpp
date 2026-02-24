@@ -1,13 +1,13 @@
 #pragma once
-#include "tuple.hpp"
 #include <iostream>
 
+template <template<typename...> class Tuple>
 inline void print_tuple(std::ostream& strm, Tuple<> const&, bool isFirst = true)
 {
   strm << (isFirst ? '(' : ')');
 }
 
-template <typename Head, typename... Tail>
+template <template<typename...> class Tuple, typename Head, typename... Tail>
 void print_tuple(std::ostream& strm, Tuple<Head, Tail...> const& t, bool isFirst = true)
 {
   strm << (isFirst ? "(" : ", ");
@@ -15,7 +15,7 @@ void print_tuple(std::ostream& strm, Tuple<Head, Tail...> const& t, bool isFirst
   print_tuple(strm, t.get_tail(), false);
 }
 
-template <typename... Types>
+template <template<typename...> class Tuple, typename... Types>
 std::ostream& operator<<(std::ostream& strm, Tuple<Types...> const& t)
 {
   print_tuple(strm, t);

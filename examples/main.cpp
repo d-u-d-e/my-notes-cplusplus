@@ -1,10 +1,28 @@
 #include "tuples/algos.hpp"
+#include "tuples/optimized/constantget.hpp"
+#include "tuples/optimized/tuplestorage3.hpp"
+#include "tuples/optimized/tuplestorage4.hpp"
 #include "tuples/tuple.hpp"
 #include "tuples/tuple_typelist.hpp"
 #include "tuples/tupleeq.hpp"
 #include "tuples/tupleio.hpp"
 #include <iostream>
 #include <string>
+
+struct A
+{
+  A()
+  {
+    std::cout << "A()" << '\n';
+  }
+};
+struct B
+{
+  B()
+  {
+    std::cout << "B()" << '\n';
+  }
+};
 
 int main()
 {
@@ -48,5 +66,21 @@ int main()
   auto e4 = pop_back(t3);
   std::cout << "pop_back(t3) is: " << e4 << std::endl;
 
+  Tuple3<int, double, bool> t4{3, 2.2, true};
+  std::cout << "t4 is: " << t4 << std::endl;
+
+  Tuple<A, char, A, char, B> t5;
+  std::cout << "sizeof(t5) is: " << sizeof(t5) << " bytes" << std::endl;
+
+  Tuple3<A, char, A, char, B> t6;
+  std::cout << "sizeof(t6) is: " << sizeof(t6) << " bytes"
+            << std::endl; // we save 1 byte wrt Tuple (EBCO)
+
+  Tuple4<A, char, A, char, B> t7(A{}, 'c', A{}, 'd', B{});
+  std::cout << "sizeof(t7) is: " << sizeof(t7) << " bytes"
+            << std::endl; // we save 1 byte as Tuple3,
+  // + 1 byte for each type A, B (as they are empty), thus is == 2
+
+  std::cout << "t5<3> is: " << get<3>(t7) << std::endl;
   return 0;
 }
