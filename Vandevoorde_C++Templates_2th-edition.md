@@ -2443,3 +2443,7 @@ to match a partial specialization an invalid construct is formed, that specializ
     If there are no limits to the amount of recursive instantiations and the number of state variables that are allowed, it can be shown that this is sufficient to compute anything that is computable. However, it may not be convenient to do so using templates. Furthermore, because template instantiation requires substantial compiler resources, extensive recursive instantiation quickly slows down a compiler or even exhausts the resources available. The C++ standard recommends but does not mandate that 1024 levels of recursive instantiations be allowed as a minimum, which is sufficient for most (but certainly not all) template metaprogramming tasks.
 
 ## Chapter 24: Typelists
+
+1) See `examples/typelists.hpp` for a list of examples with typelists. We can do insertion sort at compile time with templates!
+
+## Chapter 25: Tuples
