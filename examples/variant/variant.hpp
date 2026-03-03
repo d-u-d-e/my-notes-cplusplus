@@ -1,9 +1,10 @@
 #pragma once
 
+#include "emptyvariant.hpp"
 #include "variantchoice.hpp"
 #include "variantstorage.hpp"
+#include "variantvisitimpl.hpp"
 #include <cassert>
-#include <exception>
 
 template <typename... Types>
 class Variant : private VariantStorage<Types...>, private VariantChoice<Types, Types...>...
@@ -42,10 +43,15 @@ class Variant : private VariantStorage<Types...>, private VariantChoice<Types, T
     destroy();
   }
   void destroy();
-};
 
-class EmptyVariant : public std::exception
-{ };
+  // visitors
+  template <typename R = ComputedResultType, typename Visitor>
+  VisitResult<R, Visitor, Types&...> visit(Visitor&& vis) &;
+  template <typename R = ComputedResultType, typename Visitor>
+  VisitResult<R, Visitor, Types const&...> visit(Visitor&& vis) const&;
+  template <typename R = ComputedResultType, typename Visitor>
+  VisitResult<R, Visitor, Types&&...> visit(Visitor&& vis) &&;
+};
 
 template <typename... Types>
 template <typename T>
@@ -100,4 +106,29 @@ template <typename... Types>
 bool Variant<Types...>::empty() const
 {
   return this->get_discriminator() == 0;
+}
+
+template <typename... Types>
+template <typename R, typename Visitor>
+VisitResult<R, Visitor, Types&...> Variant<Types...>::visit(Visitor&& vis) &
+{
+  using Result = VisitResult<R, Visitor, Types&...>;
+  return variant_visit_impl<Result>(*this, std::forward<Visitor>(vis), TypeList<Types...>{});
+}
+
+template <typename... Types>
+template <typename R, typename Visitor>
+VisitResult<R, Visitor, Types const&...> Variant<Types...>::visit(Visitor&& vis) const&
+{
+  using Result = VisitResult<R, Visitor, Types const&...>;
+  return variant_visit_impl<Result>(*this, std::forward<Visitor>(vis), TypeList<Types...>{});
+}
+
+template <typename... Types>
+template <typename R, typename Visitor>
+VisitResult<R, Visitor, Types&&...> Variant<Types...>::visit(Visitor&& vis) &&
+{
+  using Result = VisitResult<R, Visitor, Types&&...>;
+  return variant_visit_impl<Result>(
+    std::move(*this), std::forward<Visitor>(vis), TypeList<Types...>{});
 }
