@@ -1,11 +1,11 @@
-#include "tuples/algos.hpp"
-#include "tuples/optimized/constantget.hpp"
-#include "tuples/optimized/tuplestorage3.hpp"
-#include "tuples/optimized/tuplestorage4.hpp"
-#include "tuples/tuple.hpp"
-#include "tuples/tuple_typelist.hpp"
-#include "tuples/tupleeq.hpp"
-#include "tuples/tupleio.hpp"
+#include "algos.hpp"
+#include "optimized/constantget.hpp"
+#include "optimized/tuplestorage3.hpp"
+#include "optimized/tuplestorage4.hpp"
+#include "tuple.hpp"
+#include "tupletypelist.hpp"
+#include "tupleeq.hpp"
+#include "tupleio.hpp"
 #include <iostream>
 #include <string>
 
