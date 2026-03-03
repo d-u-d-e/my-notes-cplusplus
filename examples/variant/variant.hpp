@@ -22,14 +22,19 @@ class Variant : private VariantStorage<Types...>, private VariantChoice<Types, T
   template <typename T>
   T const& get() const&;
 
-  template <typename T>
-  T&& get() &&;
-
   using VariantChoice<Types, Types...>::VariantChoice...;
   Variant()
   {
-    this->set_discriminator(0);
+    /*
+    making this the default initialization behavior would promote the
+    exceptional state of an empty variant to a common one 
+    We follow the semantics of C++17’s std::variant<> and default-construct a value of the first type in
+    the list of types */
+
+    //this->set_discriminator(0);
+    *this = Front<TypeList<Types...>>();
   }
+
   Variant(Variant const& source);
   Variant(Variant&& source);
 
@@ -51,6 +56,12 @@ class Variant : private VariantStorage<Types...>, private VariantChoice<Types, T
   VisitResult<R, Visitor, Types const&...> visit(Visitor&& vis) const&;
   template <typename R = ComputedResultType, typename Visitor>
   VisitResult<R, Visitor, Types&&...> visit(Visitor&& vis) &&;
+
+  // templated constructors
+  template <typename... SourceTypes>
+  Variant(Variant<SourceTypes...> const& source);
+  template <typename... SourceTypes>
+  Variant(Variant<SourceTypes...>&& source);
 };
 
 template <typename... Types>
@@ -68,7 +79,7 @@ T& Variant<Types...>::get() &
 
 template <typename... Types>
 template <typename T>
-T&& Variant<Types...>::get() &&
+const T& Variant<Types...>::get() const&
 {
   if(empty())
   {
@@ -131,4 +142,78 @@ VisitResult<R, Visitor, Types&&...> Variant<Types...>::visit(Visitor&& vis) &&
   using Result = VisitResult<R, Visitor, Types&&...>;
   return variant_visit_impl<Result>(
     std::move(*this), std::forward<Visitor>(vis), TypeList<Types...>{});
+}
+
+template <typename... Types>
+Variant<Types...>::Variant(Variant const& source)
+{
+  /*
+  To copy a source variant, we need to determine
+  which type it is currently storing, copy-construct that value into the buffer, and set that discrimi-
+  nator. Fortunately, visit() handles decoding the active value of the source variant, and the copy-
+  assignment operator inherited from VariantChoice will copy-construct a value into the buffer, 
+  leading to a compact implementation.
+  */
+
+  if(!source.empty())
+  {
+    source.visit([&](auto const& value) { *this = value; });
+  }
+}
+
+template <typename... Types>
+Variant<Types...>::Variant(Variant&& source)
+{
+  if(!source.empty())
+  {
+    std::move(source).visit([&](auto&& value) { *this = std::move(value); });
+  }
+}
+
+template <typename... Types>
+template <typename... SourceTypes>
+Variant<Types...>::Variant(Variant<SourceTypes...> const& source)
+{
+  if(!source.empty())
+  {
+    source.visit([&](auto const& value) { *this = value; });
+  }
+}
+
+template <typename... Types>
+template <typename... SourceTypes>
+Variant<Types...>::Variant(Variant<SourceTypes...>&& source)
+{
+  if(!source.empty())
+  {
+    std::move(source).visit([&](auto&& value) { *this = std::move(value); });
+  }
+}
+
+template <typename... Types>
+Variant<Types...>& Variant<Types...>::operator=(Variant const& source)
+{
+  if(!source.empty())
+  {
+    source.visit([&](auto const& value) { *this = value; });
+  }
+  else
+  {
+    destroy();
+  }
+  return *this;
+}
+
+template <typename... Types>
+Variant<Types...>& Variant<Types...>::operator=(Variant&& source)
+{
+  if(!source.empty())
+  {
+    std::move(source).visit([&](auto&& value) { *this = std::move(value); });
+  }
+  else
+  {
+    destroy();
+  }
+  return *this;
 }
