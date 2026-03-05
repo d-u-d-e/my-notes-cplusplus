@@ -1,7 +1,7 @@
 # Professional C++ - Marc Gregoire - 6th edition
 ## Chapter 2: Working with strings and string views
 
-1) Use `std::string_view` instead of `const string&` or `const char*` whenever a function requires a read-only string as one of its parameters.
+1) Use `std::string_view` instead of `const string&` or `const char*` whenever a function requires a read-only string as one of its parameters. `std::string_view` accepts a literal string or a `char*`, while `const string&` needs to construct a full `std::string` object.
 2) Functions returning a `string` should return a `const string&` or a `string`, but never a `string_view`, in order to not introduce the risk of invalidating the returned `string_view`.
 3) Since c++23 `print`, `println`, `format` require the pattern to be a compile time constant. If you need to implement translations based on a runtime format there is the family of functions `std::vprint_xxx`.
 4) An interesting trick to print a character a specific number of times uses the format specifier in the following way: if you want to print '=' 16 times use: `println("|{:=>16}|", "");`
@@ -53,7 +53,7 @@ branching out in a new direction, it’s usually better to stick to the interfac
 accustomed.
 8) Don’t provide unnecessary functionality in your interfaces; keep them clean and simple.
 A fat interface can be avoided by breaking up the interface into several smaller ones. Alternatively, the façade design pattern can be used to provide an easier interface or interfaces on top of a fat interface.
-9) A good abstraction means that the exported interface has only public member functions that are stable and will not change. A specific technique to accomplish this is called the private implementation idiom, or *pimpl idiom*.
+9) **A good abstraction means that the exported interface has only public member functions that are stable and will not change. A specific technique to accomplish this is called the private implementation idiom, or *pimpl idiom***.
 
 ## Chapter 7: Memory management
 
